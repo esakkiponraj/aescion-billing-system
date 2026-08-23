@@ -1,0 +1,728 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String                   @id @default(uuid())
+  email              String                   @unique
+  passwordHash       String
+  firstName          String
+  lastName           String
+  phone              String?
+  avatarUrl          String?
+  isSuperAdmin       Boolean                  @default(false)
+  isActive           Boolean                  @default(true)
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  decidedApprovals   ApprovalRequest[]        @relation("DecidedBy")
+  requestedApprovals ApprovalRequest[]        @relation("RequestedBy")
+  auditLogs          AuditLog[]
+  memberships        OrganizationMembership[]
+  sessions           UserSession[]
+  productAccess      ProductCashierAccess[]
+  heldOrders         HeldOrder[]
+
+  @@map("users")
+}
+
+model UserSession {
+  id               String    @id @default(uuid())
+  userId           String
+  refreshTokenHash String
+  deviceInfo       String?
+  ipAddress        String?
+  userAgent        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+model Organization {
+  id               String                   @id @default(uuid())
+  name             String
+  slug             String                   @unique
+  businessType     String                   @default("RETAIL")
+  country          String                   @default("IN")
+  currency         String                   @default("INR")
+  timezone         String                   @default("Asia/Kolkata")
+  logoUrl          String?
+  status           String                   @default("ACTIVE")
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  approvalRequests ApprovalRequest[]
+  auditLogs        AuditLog[]
+  customers        Customer[]
+  expenses         Expense[]
+  featureOverrides FeatureOverride[]
+  legalEntities    LegalEntity[]
+  memberships      OrganizationMembership[]
+  outlets          Outlet[]
+  payments         Payment[]
+  products         Product[]
+  purchaseBills    PurchaseBill[]
+  registerSessions RegisterSession[]
+  roles            Role[]
+  saleInvoices     SaleInvoice[]
+  subscriptions    Subscription[]
+  suppliers        Supplier[]
+  supportIssues    SupportIssue[]
+  heldOrders       HeldOrder[]
+
+  @@map("organizations")
+}
+
+model LegalEntity {
+  id                String       @id @default(uuid())
+  organizationId    String
+  name              String
+  taxNumber         String?
+  registeredAddress String?
+  phone             String?
+  email             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlets           Outlet[]
+
+  @@index([organizationId])
+  @@map("legal_entities")
+}
+
+model Outlet {
+  id                String             @id @default(uuid())
+  organizationId    String
+  legalEntityId     String?
+  name              String
+  code              String
+  address           String?
+  phone             String?
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  approvalRequests  ApprovalRequest[]
+  auditLogs         AuditLog[]
+  expenses          Expense[]
+  outletMemberships OutletMembership[]
+  legalEntity       LegalEntity?       @relation(fields: [legalEntityId], references: [id])
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payments          Payment[]
+  purchaseBills     PurchaseBill[]
+  registerSessions  RegisterSession[]
+  registers         Register[]
+  saleInvoices      SaleInvoice[]
+  productAccess     ProductOutletAccess[]
+  heldOrders        HeldOrder[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("outlets")
+}
+
+model Register {
+  id        String   @id @default(uuid())
+  outletId  String
+  name      String
+  code      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([outletId, code])
+  @@index([outletId])
+  @@map("registers")
+}
+
+model OrganizationMembership {
+  id                String             @id @default(uuid())
+  userId            String
+  organizationId    String
+  status            String             @default("ACTIVE")
+  joinedAt          DateTime           @default(now())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  membershipRoles   MembershipRole[]
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outletMemberships OutletMembership[]
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("organization_memberships")
+}
+
+model OutletMembership {
+  id              String                 @id @default(uuid())
+  orgMembershipId String
+  outletId        String
+  createdAt       DateTime               @default(now())
+  membershipRoles MembershipRole[]
+  orgMembership   OrganizationMembership @relation(fields: [orgMembershipId], references: [id], onDelete: Cascade)
+  outlet          Outlet                 @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([orgMembershipId, outletId])
+  @@index([outletId])
+  @@map("outlet_memberships")
+}
+
+model Role {
+  id                   String           @id @default(uuid())
+  organizationId       String?
+  name                 String
+  code                 String
+  description          String?
+  isSystemDefault      Boolean          @default(false)
+  maxDiscountPercent   Float            @default(0.0)
+  priceOverrideAllowed Boolean          @default(false)
+  approvalLimit        Float            @default(0.0)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  membershipRoles      MembershipRole[]
+  rolePermissions      RolePermission[]
+  organization         Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(uuid())
+  code            String           @unique
+  module          String
+  description     String
+  createdAt       DateTime         @default(now())
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  scope        String     @default("OUTLET")
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model MembershipRole {
+  id                 String                 @id @default(uuid())
+  orgMembershipId    String
+  outletMembershipId String?
+  roleId             String
+  createdAt          DateTime               @default(now())
+  orgMembership      OrganizationMembership @relation(fields: [orgMembershipId], references: [id], onDelete: Cascade)
+  outletMembership   OutletMembership?      @relation(fields: [outletMembershipId], references: [id], onDelete: Cascade)
+  role               Role                   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([orgMembershipId])
+  @@index([outletMembershipId])
+  @@index([roleId])
+  @@map("membership_roles")
+}
+
+model ApprovalRequest {
+  id                String       @id @default(uuid())
+  organizationId    String
+  outletId          String?
+  requestedByUserId String
+  approvalType      String
+  resourceType      String
+  resourceId        String?
+  requestedValue    String
+  reason            String
+  status            String       @default("PENDING")
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  comments          String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  decidedByUser     User?        @relation("DecidedBy", fields: [decidedByUserId], references: [id])
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet            Outlet?      @relation(fields: [outletId], references: [id])
+  requestedByUser   User         @relation("RequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([requestedByUserId])
+  @@map("approval_requests")
+}
+
+model AuditLog {
+  id             String        @id @default(uuid())
+  organizationId String?
+  outletId       String?
+  userId         String?
+  action         String
+  resource       String
+  resourceId     String?
+  beforeState    String?
+  afterState     String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime      @default(now())
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet         Outlet?       @relation(fields: [outletId], references: [id])
+  user           User?         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model Plan {
+  id            String         @id @default(uuid())
+  name          String
+  code          String         @unique
+  description   String?
+  maxOutlets    Int            @default(1)
+  maxUsers      Int            @default(3)
+  maxRegisters  Int            @default(1)
+  isCustom      Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  planFeatures  PlanFeature[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Feature {
+  id               String            @id @default(uuid())
+  code             String            @unique
+  name             String
+  description      String?
+  module           String
+  featureOverrides FeatureOverride[]
+  planFeatures     PlanFeature[]
+
+  @@map("features")
+}
+
+model PlanFeature {
+  id         String  @id @default(uuid())
+  planId     String
+  featureId  String
+  isEnabled  Boolean @default(true)
+  limitValue Int?
+  feature    Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  plan       Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, featureId])
+  @@map("plan_features")
+}
+
+model Subscription {
+  id             String       @id @default(uuid())
+  organizationId String
+  planId         String
+  status         String       @default("ACTIVE")
+  trialEndsAt    DateTime?
+  startsAt       DateTime     @default(now())
+  endsAt         DateTime?
+  autoRenew      Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan           Plan         @relation(fields: [planId], references: [id])
+
+  @@index([organizationId])
+  @@map("subscriptions")
+}
+
+model FeatureOverride {
+  id             String       @id @default(uuid())
+  organizationId String
+  featureId      String
+  isEnabled      Boolean      @default(true)
+  limitValue     Int?
+  reason         String?
+  expiresAt      DateTime?
+  createdAt      DateTime     @default(now())
+  feature        Feature      @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, featureId])
+  @@map("feature_overrides")
+}
+
+model SupportIssue {
+  id               String       @id @default(uuid())
+  organizationId   String
+  raisedByUserId   String?
+  category         String       @default("TECHNICAL")
+  title            String
+  description      String
+  priority         String       @default("MEDIUM")
+  status           String       @default("OPEN")
+  assignedToUserId String?
+  internalNotes    String?
+  resolution       String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("support_issues")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  category  String   @default("GENERAL")
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model Customer {
+  id                 String        @id @default(uuid())
+  organizationId     String
+  name               String
+  phone              String?
+  email              String?
+  taxNumber          String?
+  billingAddress     String?
+  creditLimit        Float         @default(0.0)
+  outstandingBalance Float         @default(0.0)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payments           Payment[]
+  saleInvoices       SaleInvoice[]
+
+  @@index([organizationId])
+  @@map("customers")
+}
+
+model Supplier {
+  id                 String         @id @default(uuid())
+  organizationId     String
+  name               String
+  contactPerson      String?
+  phone              String?
+  email              String?
+  taxNumber          String?
+  address            String?
+  paymentTermsDays   Int            @default(30)
+  outstandingBalance Float          @default(0.0)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  payments           Payment[]
+  purchaseBills      PurchaseBill[]
+  organization       Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("suppliers")
+}
+
+model Product {
+  id                String             @id @default(uuid())
+  organizationId    String
+  name              String
+  sku               String
+  barcode           String?
+  category          String             @default("General")
+  costPrice         Float              @default(0.0)
+  sellingPrice      Float
+  taxRate           Float              @default(0.0)
+  hsnCode           String?
+  stockQty          Float              @default(0.0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchaseBillItems PurchaseBillItem[]
+  saleInvoiceItems  SaleInvoiceItem[]
+  outletAccess      ProductOutletAccess[]
+  cashierAccess     ProductCashierAccess[]
+
+  @@unique([organizationId, sku])
+  @@index([organizationId])
+  @@map("products")
+}
+
+model SaleInvoice {
+  id                String            @id @default(uuid())
+  invoiceNumber     String
+  organizationId    String
+  outletId          String
+  registerId        String?
+  customerId        String?
+  subtotal          Float             @default(0.0)
+  discountAmount    Float             @default(0.0)
+  taxableAmount     Float             @default(0.0)
+  cgstAmount        Float             @default(0.0)
+  sgstAmount        Float             @default(0.0)
+  igstAmount        Float             @default(0.0)
+  totalAmount       Float             @default(0.0)
+  paidAmount        Float             @default(0.0)
+  outstandingAmount Float             @default(0.0)
+  paymentStatus     String            @default("PAID")
+  isPosSale         Boolean           @default(true)
+  dueDate           DateTime?
+  createdByUserId   String?
+  registerSessionId String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  payments          Payment[]
+  items             SaleInvoiceItem[]
+  customer          Customer?         @relation(fields: [customerId], references: [id])
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet            Outlet            @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  registerSession   RegisterSession?  @relation(fields: [registerSessionId], references: [id])
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, outletId])
+  @@index([organizationId, createdAt])
+  @@index([registerSessionId])
+  @@index([paymentStatus])
+  @@map("sale_invoices")
+}
+
+model SaleInvoiceItem {
+  id             String      @id @default(uuid())
+  invoiceId      String
+  productId      String?
+  description    String
+  quantity       Float       @default(1.0)
+  unitCost       Float       @default(0.0)
+  unitPrice      Float
+  discountAmount Float       @default(0.0)
+  taxRate        Float       @default(0.0)
+  taxableAmount  Float
+  cgst           Float       @default(0.0)
+  sgst           Float       @default(0.0)
+  igst           Float       @default(0.0)
+  totalAmount    Float
+  invoice        SaleInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product        Product?    @relation(fields: [productId], references: [id])
+
+  @@index([invoiceId])
+  @@map("sale_invoice_items")
+}
+
+model PurchaseBill {
+  id                    String             @id @default(uuid())
+  billNumber            String
+  supplierInvoiceNumber String?
+  organizationId        String
+  outletId              String
+  supplierId            String
+  purchaseDate          DateTime           @default(now())
+  dueDate               DateTime?
+  subtotal              Float              @default(0.0)
+  discountAmount        Float              @default(0.0)
+  taxableAmount         Float              @default(0.0)
+  cgstAmount            Float              @default(0.0)
+  sgstAmount            Float              @default(0.0)
+  igstAmount            Float              @default(0.0)
+  totalAmount           Float              @default(0.0)
+  paidAmount            Float              @default(0.0)
+  outstandingAmount     Float              @default(0.0)
+  paymentStatus         String             @default("PAID")
+  createdByUserId       String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  payments              Payment[]
+  items                 PurchaseBillItem[]
+  organization          Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet                Outlet             @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  supplier              Supplier           @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, billNumber])
+  @@index([organizationId, outletId])
+  @@index([organizationId, purchaseDate])
+  @@index([paymentStatus])
+  @@map("purchase_bills")
+}
+
+model PurchaseBillItem {
+  id             String       @id @default(uuid())
+  purchaseBillId String
+  productId      String?
+  description    String
+  quantity       Float        @default(1.0)
+  unitCost       Float
+  taxRate        Float        @default(0.0)
+  taxableAmount  Float
+  cgst           Float        @default(0.0)
+  sgst           Float        @default(0.0)
+  igst           Float        @default(0.0)
+  totalAmount    Float
+  product        Product?     @relation(fields: [productId], references: [id])
+  purchaseBill   PurchaseBill @relation(fields: [purchaseBillId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseBillId])
+  @@map("purchase_bill_items")
+}
+
+model Payment {
+  id                String           @id @default(uuid())
+  paymentNumber     String
+  organizationId    String
+  outletId          String
+  type              String
+  customerId        String?
+  supplierId        String?
+  invoiceId         String?
+  purchaseBillId    String?
+  registerSessionId String?
+  amount            Float
+  paymentMethod     String
+  referenceNumber   String?
+  transactionDate   DateTime         @default(now())
+  status            String           @default("COMPLETED")
+  createdByUserId   String?
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  customer          Customer?        @relation(fields: [customerId], references: [id])
+  invoice           SaleInvoice?     @relation(fields: [invoiceId], references: [id])
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet            Outlet           @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  purchaseBill      PurchaseBill?    @relation(fields: [purchaseBillId], references: [id])
+  supplier          Supplier?        @relation(fields: [supplierId], references: [id])
+  registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
+
+  @@unique([organizationId, paymentNumber])
+  @@index([organizationId, outletId])
+  @@index([organizationId, transactionDate])
+  @@index([registerSessionId])
+  @@map("payments")
+}
+
+model Expense {
+  id              String       @id @default(uuid())
+  expenseNumber   String
+  organizationId  String
+  outletId        String
+  category        String
+  description     String
+  amount          Float
+  taxAmount       Float        @default(0.0)
+  paymentMethod   String       @default("CASH")
+  expenseDate     DateTime     @default(now())
+  vendorName      String?
+  referenceNumber String?
+  status          String       @default("PAID")
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet          Outlet       @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, expenseNumber])
+  @@index([organizationId, outletId])
+  @@index([organizationId, expenseDate])
+  @@map("expenses")
+}
+
+model RegisterSession {
+  id                  String        @id @default(uuid())
+  organizationId      String
+  outletId            String
+  registerId          String
+  openedByUserId      String
+  closedByUserId      String?
+  openingFloat        Float         @default(0.0)
+  cashSales           Float         @default(0.0)
+  cashReceipts        Float         @default(0.0)
+  cashRefunds         Float         @default(0.0)
+  cashPaidOut         Float         @default(0.0)
+  expectedClosingCash Float         @default(0.0)
+  actualClosingCash   Float?
+  cashDifference      Float?
+  closingNotes        String?
+  status              String        @default("OPEN")
+  openedAt            DateTime      @default(now())
+  closedAt            DateTime?
+  organization        Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet              Outlet        @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  saleInvoices        SaleInvoice[]
+  payments            Payment[]
+  heldOrders          HeldOrder[]
+
+  @@index([organizationId, outletId])
+  @@index([organizationId, openedAt])
+  @@index([openedByUserId, status])
+  @@map("register_sessions")
+}
+
+model ProductOutletAccess {
+  id        String   @id @default(uuid())
+  productId String
+  outletId  String
+  createdAt DateTime @default(now())
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, outletId])
+  @@index([productId])
+  @@index([outletId])
+  @@map("product_outlet_access")
+}
+
+model ProductCashierAccess {
+  id        String   @id @default(uuid())
+  productId String
+  userId    String
+  createdAt DateTime @default(now())
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@index([productId])
+  @@index([userId])
+  @@map("product_cashier_access")
+}
+
+model HeldOrder {
+  id                String           @id @default(uuid())
+  holdNumber        String
+  organizationId    String
+  outletId          String
+  userId            String
+  registerSessionId String?
+  customerName      String           @default("Walk-in Customer")
+  notes             String?
+  orderType         String           @default("RETAIL")
+  tableNumber       String?
+  itemsJson         String
+  itemCount         Int              @default(1)
+  subtotal          Float            @default(0.0)
+  discountPercent   Float            @default(0.0)
+  discountAmount    Float            @default(0.0)
+  taxAmount         Float            @default(0.0)
+  totalAmount       Float            @default(0.0)
+  status            String           @default("HELD")
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet            Outlet           @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
+
+  @@index([organizationId, outletId])
+  @@index([userId, status])
+  @@index([registerSessionId])
+  @@map("held_orders")
+}
+
+

@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+
+# Environment files
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Vite cache
+.vite/
+**/.vite/
+
+# Logs
+*.log
+# Local database files
+*.db
+*.db-journal
+# Local database and Firebase cache
+*.db
+*.db-journal
+.firebase/

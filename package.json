@@ -1,0 +1,34 @@
+{
+  "name": "aescion-billing-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-tenant Billing, POS, Inventory, and Operations Platform",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:api": "npm run dev --workspace=@aescion/api",
+    "dev:web": "npm run dev --workspace=@aescion/web",
+    "db:generate": "npm run db:generate --workspace=@aescion/api",
+    "db:migrate": "npm run db:migrate --workspace=@aescion/api",
+    "db:seed": "npm run db:seed --workspace=@aescion/api",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "keywords": [
+    "pos",
+    "billing",
+    "saas",
+    "multi-tenant",
+    "inventory",
+    "operations"
+  ],
+  "author": "AESCION Engineering",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "firebase": "^12.18.0"
+  }
+}
