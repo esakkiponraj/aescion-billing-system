@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock, LogIn, Sparkles, Building, UserCheck, Shield } from 'lucide-react';
 import { Button } from '../../components/common/Button';
@@ -121,7 +121,7 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <Card variant="solid" className="border-slate-200 shadow-xl p-6 sm:p-8">
+      <Card variant="solid" className="border-slate-200 shadow-xl p-4 sm:p-8">
         <div className="mb-6">
           <h2 className="text-xl font-bold text-slate-900 tracking-tight">
             Sign In to Workspace

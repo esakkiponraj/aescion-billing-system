@@ -11,6 +11,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { ProductsModule } from './modules/products/products.module';
+import { PresenceModule } from './modules/presence/presence.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { TenantGuard } from './common/guards/tenant.guard';
@@ -34,6 +35,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
     SuperAdminModule,
     FinanceModule,
     ProductsModule,
+    PresenceModule,
   ],
   providers: [
     {

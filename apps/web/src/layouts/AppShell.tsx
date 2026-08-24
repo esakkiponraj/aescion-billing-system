@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -29,6 +29,12 @@ import { CommandBar } from '../components/common/CommandBar';
 import { Modal } from '../components/common/Modal';
 import { Badge } from '../components/common/Badge';
 import { getBusinessTypeCapability } from '@aescion/types';
+import {
+  getSocket,
+  sendCashierHeartbeat,
+  sendCashierLogout,
+  disconnectSocket,
+} from '../services/socket';
 
 export const AppShell: React.FC = () => {
   const { user, organizations, supportSession, clearAuth } = useAuthStore();
@@ -52,11 +58,6 @@ export const AppShell: React.FC = () => {
   const [isOutletModalOpen, setIsOutletModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  const handleLogout = () => {
-    clearAuth();
-    navigate('/login');
-  };
-
   const currentOrg = organizations.find((o) => o.organizationId === activeOrgId);
   const availableOutlets = currentOrg?.outlets || [];
 
@@ -66,6 +67,46 @@ export const AppShell: React.FC = () => {
   const isManager = roles.includes('MANAGER');
   const isCashier = roles.includes('CASHIER');
   const isAccountant = roles.includes('ACCOUNTANT');
+
+  // Real-time WebSocket connection & Cashier 15s Heartbeat
+  useEffect(() => {
+    if (!user) {
+      disconnectSocket();
+      return;
+    }
+
+    getSocket();
+
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    if (isCashier) {
+      sendCashierHeartbeat();
+      heartbeatTimer = setInterval(() => {
+        sendCashierHeartbeat();
+      }, 15000);
+    }
+
+    return () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    };
+  }, [user, isCashier]);
+
+  // Lock body scroll when mobile drawer is open
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileMenuOpen]);
+
+  const handleLogout = async () => {
+    await sendCashierLogout();
+    clearAuth();
+    navigate('/login');
+  };
 
   const capabilities = getBusinessTypeCapability(businessType || currentOrg?.businessType);
 
@@ -314,6 +355,56 @@ export const AppShell: React.FC = () => {
           </NavLink>
         )}
 
+        {/* Core Financial & Billing Modules */}
+        <div className="pt-3 px-3 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+          Billing & Documents
+        </div>
+
+        <NavLink
+          to="/quotations"
+          onClick={() => setIsMobileMenuOpen(false)}
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+              isActive || location.pathname.startsWith('/quotations')
+                ? 'bg-brand-50 text-brand-700 font-bold border border-brand-200/80 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`
+          }
+        >
+          <FileText className="w-4 h-4 text-amber-600" />
+          <span>Quotations</span>
+        </NavLink>
+
+        <NavLink
+          to="/invoices"
+          onClick={() => setIsMobileMenuOpen(false)}
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+              isActive || location.pathname.startsWith('/invoices')
+                ? 'bg-brand-50 text-brand-700 font-bold border border-brand-200/80 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`
+          }
+        >
+          <CreditCard className="w-4 h-4 text-blue-600" />
+          <span>Invoices</span>
+        </NavLink>
+
+        <NavLink
+          to="/receipts"
+          onClick={() => setIsMobileMenuOpen(false)}
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+              isActive || location.pathname.startsWith('/receipts')
+                ? 'bg-brand-50 text-brand-700 font-bold border border-brand-200/80 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`
+          }
+        >
+          <Shield className="w-4 h-4 text-emerald-600" />
+          <span>Receipts</span>
+        </NavLink>
+
         {(isOwner || isManager) && (
           <>
             <div className="pt-4 px-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -371,61 +462,67 @@ export const AppShell: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 selection:bg-brand-500/20 selection:text-brand-700">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-50 text-slate-800 selection:bg-brand-500/20 selection:text-brand-700">
       {/* Support Mode Impersonation Banner */}
       <SupportBanner />
 
       {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-30 h-16 border-b border-slate-200 bg-white px-4 lg:px-6 flex items-center justify-between gap-4 shadow-xs">
+      <header className="flex-shrink-0 z-30 h-16 border-b border-slate-200 bg-white px-3 sm:px-4 lg:px-6 flex items-center justify-between gap-2 sm:gap-4 shadow-xs sticky top-0">
         {/* Brand Logo, Mobile Toggle & Switchers */}
-        <div className="flex items-center gap-3 md:gap-5">
-          {/* Mobile Menu Toggle */}
+        <div className="flex-1 flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Mobile Menu Toggle (44px min touch target) */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+            className="md:hidden min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 shrink-0 transition-colors"
+            aria-label="Toggle navigation menu"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
 
+          {/* Logo */}
           <div
             onClick={() => navigate(isSuperAdminMode ? '/super-admin' : '/dashboard')}
-            className="flex items-center gap-2.5 cursor-pointer group"
+            className="flex items-center gap-2 cursor-pointer group shrink-0"
           >
-            <div className="w-9 h-9 rounded-lg bg-brand-600 flex items-center justify-center shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform">
-              <Zap className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-brand-600 flex items-center justify-center shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform shrink-0">
+              <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <span className="text-lg font-black tracking-tight text-slate-900 hidden sm:inline-block">
+            <span className="text-base sm:text-lg font-black tracking-tight text-slate-900 hidden sm:inline-block">
               AESCION
             </span>
           </div>
 
           <div className="h-5 w-[1px] bg-slate-200 hidden md:block" />
 
-          {/* If NOT Super Admin Mode, Show Tenant Organization & Outlet Switchers */}
+          {/* Tenant Organization & Outlet Switchers */}
           {!isSuperAdminMode && activeOrgName && (
-            <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0 flex items-center gap-1.5 sm:gap-2">
               <button
                 onClick={() => setIsOrgModalOpen(true)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-all text-xs font-semibold text-slate-700 shadow-xs group"
+                className="flex-1 sm:flex-initial flex items-center justify-between sm:justify-start gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 h-9 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-all text-xs font-semibold text-slate-700 shadow-xs group min-w-0"
+                title={`Organization: ${activeOrgName}`}
               >
-                <Building className="w-3.5 h-3.5 text-brand-600" />
-                <span className="max-w-[120px] sm:max-w-[160px] truncate font-bold">
-                  {activeOrgName}
-                </span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-transform" />
+                <div className="flex items-center gap-1.5 min-w-0 truncate">
+                  <Building className="w-3.5 h-3.5 text-brand-600 shrink-0" />
+                  <span className="truncate font-bold text-slate-800">
+                    {activeOrgName}
+                  </span>
+                </div>
+                <ChevronDown className="w-3 h-3 text-slate-400 group-hover:text-slate-600 transition-transform shrink-0 ml-1" />
               </button>
 
               {/* Outlet Switcher Dropdown Button */}
               {activeOutletName && (
                 <button
                   onClick={() => setIsOutletModalOpen(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-all text-xs font-semibold text-slate-700 shadow-xs group"
+                  className="hidden md:flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 h-9 rounded-lg bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-all text-xs font-semibold text-slate-700 shadow-xs group min-w-0 shrink-0"
+                  title={`Branch: ${activeOutletName}`}
                 >
-                  <Store className="w-3.5 h-3.5 text-orange-500" />
-                  <span className="max-w-[100px] sm:max-w-[140px] truncate font-bold">
+                  <Store className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                  <span className="max-w-[120px] truncate font-bold">
                     {activeOutletName}
                   </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-transform" />
+                  <ChevronDown className="w-3 h-3 text-slate-400 group-hover:text-slate-600 transition-transform shrink-0" />
                 </button>
               )}
             </div>
@@ -440,7 +537,7 @@ export const AppShell: React.FC = () => {
         </div>
 
         {/* User Profile & Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <Badge
             variant={
               isSuperAdminMode
@@ -462,14 +559,15 @@ export const AppShell: React.FC = () => {
           </Badge>
 
           {/* User Avatar & Logout */}
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <div className="w-8 h-8 rounded-lg bg-brand-50 border border-brand-200 flex items-center justify-center font-bold text-xs text-brand-700 shadow-xs">
+          <div className="flex items-center gap-1 sm:gap-2 pl-1.5 sm:pl-2 border-l border-slate-200">
+            <div className="w-8 h-8 rounded-lg bg-brand-50 border border-brand-200 flex items-center justify-center font-bold text-xs text-brand-700 shadow-xs shrink-0">
               {user?.firstName?.[0] || 'U'}
             </div>
             <button
               onClick={handleLogout}
-              className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
               title="Sign Out"
+              aria-label="Sign Out"
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -478,14 +576,14 @@ export const AppShell: React.FC = () => {
       </header>
 
       {/* Main Workspace Body */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative min-h-0">
         {/* Left Navigation Sidebar (Desktop) */}
-        <aside className="w-64 border-r border-slate-200 bg-white p-4 hidden md:flex flex-col justify-between shrink-0 shadow-xs">
-          <div className="overflow-y-auto pr-1">{renderNavLinks()}</div>
+        <aside className="w-64 h-full border-r border-slate-200 bg-white p-4 hidden md:flex flex-col justify-between shrink-0 shadow-xs overflow-hidden">
+          <div className="flex-1 overflow-y-auto pr-1 min-h-0">{renderNavLinks()}</div>
 
           {/* Bottom Organization Details */}
           {!isSuperAdminMode && activeOrgName && (
-            <div className="pt-4 mt-auto border-t border-slate-200">
+            <div className="pt-4 mt-auto border-t border-slate-200 flex-shrink-0">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1 shadow-xs">
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                   Active Workspace
@@ -505,25 +603,57 @@ export const AppShell: React.FC = () => {
         {/* Mobile Navigation Drawer */}
         {isMobileMenuOpen && (
           <div className="fixed inset-0 z-40 md:hidden flex">
+            {/* Dark Backdrop */}
             <div
-              className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs"
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity animate-in fade-in"
               onClick={() => setIsMobileMenuOpen(false)}
             />
-            <div className="relative w-64 bg-white border-r border-slate-200 p-4 flex flex-col justify-between z-50 shadow-2xl h-full">
-              <div className="overflow-y-auto pr-1">{renderNavLinks()}</div>
-              <button
-                onClick={handleLogout}
-                className="mt-4 w-full flex items-center justify-center gap-2 p-2.5 rounded-lg bg-rose-50 text-rose-700 font-bold text-xs border border-rose-200"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Sign Out</span>
-              </button>
+            {/* Drawer Container */}
+            <div className="relative w-72 max-w-[85vw] bg-white border-r border-slate-200 p-4 flex flex-col justify-between z-50 shadow-2xl h-full animate-in slide-in-from-left duration-200">
+              {/* Drawer Top Header */}
+              <div className="flex items-center justify-between pb-3 mb-2 border-b border-slate-200 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center text-white shadow-xs">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-black text-slate-900 text-sm">AESCION</span>
+                    <span className="block text-[10px] text-slate-500 font-medium">Navigation</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                  aria-label="Close navigation menu"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto pr-1 min-h-0">{renderNavLinks()}</div>
+
+              {/* Drawer Footer */}
+              <div className="pt-3 mt-auto border-t border-slate-200 shrink-0 space-y-2">
+                {!isSuperAdminMode && activeOrgName && (
+                  <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+                    <p className="font-bold text-slate-900 truncate">{activeOrgName}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{activeOutletName || 'Headquarters'}</p>
+                  </div>
+                )}
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center justify-center gap-2 p-2.5 rounded-lg bg-rose-50 text-rose-700 font-bold text-xs border border-rose-200"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {/* Content Pane */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50 min-w-0">
+        <main className="flex-1 h-full overflow-y-auto px-4 sm:px-6 md:px-8 py-4 sm:py-6 pb-16 sm:pb-8 bg-slate-50 min-w-0">
           <Outlet />
         </main>
       </div>

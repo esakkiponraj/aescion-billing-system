@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldAlert, LogOut, Clock } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import { Button } from './Button';
@@ -28,7 +28,7 @@ export const SupportBanner: React.FC = () => {
   if (!supportSession) return null;
 
   return (
-    <div className="w-full bg-amber-500 text-white px-4 py-2 flex flex-wrap items-center justify-between gap-3 shadow-sm z-40 border-b border-amber-600">
+    <div className="w-full bg-amber-500 text-white px-4 py-2 flex flex-wrap items-center justify-between gap-3 shadow-sm z-40 border-b border-amber-600 flex-shrink-0">
       <div className="flex items-center gap-2.5">
         <ShieldAlert className="w-5 h-5 text-white animate-bounce" />
         <span className="font-bold text-xs uppercase tracking-wider bg-amber-700 text-white px-2 py-0.5 rounded">

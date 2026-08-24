@@ -145,9 +145,55 @@ export const Permissions = {
   // Approvals
   APPROVALS_READ: 'approvals.read',
   APPROVALS_DECIDE: 'approvals.decide',
+
+  // Quotations
+  QUOTATIONS_READ: 'quotations.read',
+  QUOTATIONS_CREATE: 'quotations.create',
+  QUOTATIONS_UPDATE: 'quotations.update',
+  QUOTATIONS_CONVERT: 'quotations.convert',
+  QUOTATIONS_CANCEL: 'quotations.cancel',
+
+  // Receipts
+  RECEIPTS_READ: 'receipts.read',
+  RECEIPTS_VOID: 'receipts.void',
 } as const;
 
 export type PermissionCode = (typeof Permissions)[keyof typeof Permissions];
+
+export enum QuotationStatus {
+  DRAFT = 'DRAFT',
+  SENT = 'SENT',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  EXPIRED = 'EXPIRED',
+  CONVERTED = 'CONVERTED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum InvoiceStatus {
+  DRAFT = 'DRAFT',
+  SENT = 'SENT',
+  UNPAID = 'UNPAID',
+  PARTIALLY_PAID = 'PARTIALLY_PAID',
+  PAID = 'PAID',
+  OVERDUE = 'OVERDUE',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum ReceiptStatus {
+  ISSUED = 'ISSUED',
+  VOIDED = 'VOIDED',
+}
+
+export enum DocumentPaymentMethod {
+  CASH = 'CASH',
+  UPI = 'UPI',
+  CARD = 'CARD',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+  CHEQUE = 'CHEQUE',
+  OTHER = 'OTHER',
+  CREDIT = 'CREDIT',
+}
 
 // User & Auth Interfaces
 export interface AuthenticatedUser {

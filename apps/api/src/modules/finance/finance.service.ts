@@ -3,13 +3,33 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '@aescion/types';
+import { PresenceService } from '../presence/presence.service';
+import { PresenceGateway } from '../presence/presence.gateway';
+import { generateDocumentNumber } from './quotations.service';
 
 @Injectable()
 export class FinanceService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private presenceService: PresenceService,
+    @Inject(forwardRef(() => PresenceGateway))
+    private presenceGateway: PresenceGateway,
+  ) {}
+
+  private isOwnerOrManager(tenantContext: TenantContext): boolean {
+    const roles = tenantContext.roles || [];
+    return (
+      roles.includes('OWNER') ||
+      roles.includes('MANAGER') ||
+      roles.includes('SUPER_ADMIN') ||
+      roles.includes('SUPER_ADMIN_SUPPORT')
+    );
+  }
 
   // Helper to get outlet filter based on tenant context
   private getOutletFilter(tenantContext?: TenantContext, requestedOutletId?: string) {
@@ -203,13 +223,34 @@ export class FinanceService {
     });
 
     // 6. Top Selling Products
-    const productStatsMap = new Map<string, { name: string; quantity: number; revenue: number }>();
+    const productStatsMap = new Map<
+      string,
+      {
+        productId?: string;
+        productName: string;
+        name: string;
+        quantity: number;
+        totalQuantity: number;
+        revenue: number;
+        totalRevenue: number;
+      }
+    >();
     for (const inv of salesInvoices) {
       for (const item of inv.items) {
         const key = item.productId || item.description;
-        const current = productStatsMap.get(key) || { name: item.description, quantity: 0, revenue: 0 };
+        const current = productStatsMap.get(key) || {
+          productId: item.productId || undefined,
+          productName: item.description,
+          name: item.description,
+          quantity: 0,
+          totalQuantity: 0,
+          revenue: 0,
+          totalRevenue: 0,
+        };
         current.quantity += item.quantity;
+        current.totalQuantity += item.quantity;
         current.revenue += item.totalAmount;
+        current.totalRevenue += item.totalAmount;
         productStatsMap.set(key, current);
       }
     }
@@ -218,36 +259,248 @@ export class FinanceService {
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5);
 
-    // 7. Cashier-wise Sales Performance
-    const cashierUserIds = Array.from(new Set(salesInvoices.map((inv) => inv.createdByUserId).filter(Boolean))) as string[];
-    const cashierUsers = cashierUserIds.length > 0
-      ? await this.prisma.user.findMany({
-          where: { id: { in: cashierUserIds } },
-          select: { id: true, firstName: true, lastName: true, email: true },
-        })
-      : [];
+    // 7. Quotations & Receipts Aggregates
+    const allOrgQuotations = await this.prisma.quotation.findMany({
+      where: {
+        organizationId: orgId,
+        ...(outletId ? { outletId } : {}),
+      },
+      select: {
+        id: true,
+        status: true,
+        totalAmount: true,
+        quotationDate: true,
+        createdByUserId: true,
+        createdAt: true,
+      },
+    });
 
-    const cashierMap = new Map(cashierUsers.map((u) => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
+    const totalQuotations = allOrgQuotations.length;
+    const todayQuotations = allOrgQuotations.filter(
+      (q) => q.quotationDate >= startOfToday && q.quotationDate <= endOfToday,
+    ).length;
+    const acceptedQuotations = allOrgQuotations.filter((q) => q.status === 'ACCEPTED').length;
+    const pendingQuotations = allOrgQuotations.filter(
+      (q) => q.status === 'DRAFT' || q.status === 'SENT',
+    ).length;
+    const convertedQuotations = allOrgQuotations.filter((q) => q.status === 'CONVERTED').length;
 
-    const cashierStatsMap = new Map<string, { cashierId: string; cashierName: string; totalSales: number; invoiceCount: number }>();
-    for (const inv of salesInvoices) {
-      const cId = inv.createdByUserId || 'unassigned';
-      const cName = cId === 'unassigned' ? 'System / Unassigned' : cashierMap.get(cId) || 'Cashier';
-      const current = cashierStatsMap.get(cId) || { cashierId: cId, cashierName: cName, totalSales: 0, invoiceCount: 0 };
-      current.totalSales += inv.totalAmount;
-      current.invoiceCount += 1;
-      cashierStatsMap.set(cId, current);
+    const allOrgReceipts = await this.prisma.receipt.findMany({
+      where: {
+        organizationId: orgId,
+        ...(outletId ? { outletId } : {}),
+      },
+      select: {
+        id: true,
+        amountPaid: true,
+        status: true,
+        paymentDate: true,
+        createdByUserId: true,
+        createdAt: true,
+      },
+    });
+
+    const validReceipts = allOrgReceipts.filter((r) => r.status !== 'VOIDED');
+    const totalReceipts = validReceipts.length;
+    const todayReceipts = validReceipts.filter(
+      (r) => r.paymentDate >= startOfToday && r.paymentDate <= endOfToday,
+    ).length;
+    const totalCollected = validReceipts.reduce((acc, r) => acc + r.amountPaid, 0);
+    const todayCollected = validReceipts
+      .filter((r) => r.paymentDate >= startOfToday && r.paymentDate <= endOfToday)
+      .reduce((acc, r) => acc + r.amountPaid, 0);
+
+    const nonCancelledInvoices = allOrgInvoices.filter((i) => i.paymentStatus !== 'CANCELLED');
+    const totalInvoiced = nonCancelledInvoices.reduce((acc, i) => acc + i.totalAmount, 0);
+    const totalOutstanding = nonCancelledInvoices.reduce((acc, i) => acc + i.outstandingAmount, 0);
+    const todayInvoicesCount = todayInvoices.length;
+
+    // 8. Cashier-wise Performance Breakdown
+    const cashierUserIds = Array.from(
+      new Set([
+        ...salesInvoices.map((inv) => inv.createdByUserId).filter(Boolean),
+        ...allOrgQuotations.map((q) => q.createdByUserId).filter(Boolean),
+        ...allOrgReceipts.map((r) => r.createdByUserId).filter(Boolean),
+      ]),
+    ) as string[];
+
+    const orgMemberships = await this.prisma.organizationMembership.findMany({
+      where: { organizationId: orgId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            isActive: true,
+            lastSeenAt: true,
+          },
+        },
+        membershipRoles: {
+          include: { role: true },
+        },
+        outletMemberships: {
+          include: {
+            membershipRoles: {
+              include: { role: true },
+            },
+          },
+        },
+      },
+    });
+
+    const cashierUsersMap = new Map<
+      string,
+      {
+        name: string;
+        status: 'ACTIVE' | 'INACTIVE';
+        isActive: boolean;
+        isOnline: boolean;
+        lastSeenAt: string | null;
+      }
+    >();
+
+    const cashierStatsMap = new Map<
+      string,
+      {
+        cashierId: string;
+        cashierName: string;
+        totalSales: number;
+        invoiceCount: number;
+        quotationsCreated: number;
+        acceptedQuotations: number;
+        invoicesCreated: number;
+        receiptsGenerated: number;
+        totalCollected: number;
+        todayCollected: number;
+        lastActivity: string | null;
+        status: 'ACTIVE' | 'INACTIVE';
+        isActive: boolean;
+        isOnline: boolean;
+        lastSeenAt: string | null;
+      }
+    >();
+
+    for (const m of orgMemberships) {
+      const isActivityUser = cashierUserIds.includes(m.userId);
+      const isCashierRole =
+        m.membershipRoles.some(
+          (mr) =>
+            mr.role?.code === 'CASHIER' ||
+            mr.role?.name?.toLowerCase().includes('cashier'),
+        ) ||
+        m.outletMemberships.some((om) =>
+          om.membershipRoles.some(
+            (mr) =>
+              mr.role?.code === 'CASHIER' ||
+              mr.role?.name?.toLowerCase().includes('cashier'),
+          ),
+        );
+
+      const isStaffCashier = isCashierRole || isActivityUser;
+
+      const userName = `${m.user.firstName || ''} ${m.user.lastName || ''}`.trim() || m.user.email || 'Cashier';
+      const isAccountEnabled = (m.status === 'ACTIVE' || m.status === 'Active') && m.user.isActive !== false;
+      const isLiveOnline = isAccountEnabled && this.presenceService.isCashierOnline(m.userId, m.user);
+      const status: 'ACTIVE' | 'INACTIVE' = isLiveOnline ? 'ACTIVE' : 'INACTIVE';
+      const lastSeenAtStr = m.user.lastSeenAt ? m.user.lastSeenAt.toISOString() : null;
+
+      cashierUsersMap.set(m.userId, {
+        name: userName,
+        status,
+        isActive: isLiveOnline,
+        isOnline: isLiveOnline,
+        lastSeenAt: lastSeenAtStr,
+      });
+
+      if (isStaffCashier) {
+        const isAssignedToOutlet =
+          !outletId ||
+          m.outletMemberships.length === 0 ||
+          m.outletMemberships.some((om) => om.outletId === outletId) ||
+          isActivityUser;
+        if (isAssignedToOutlet) {
+          cashierStatsMap.set(m.userId, {
+            cashierId: m.userId,
+            cashierName: userName,
+            totalSales: 0,
+            invoiceCount: 0,
+            quotationsCreated: 0,
+            acceptedQuotations: 0,
+            invoicesCreated: 0,
+            receiptsGenerated: 0,
+            totalCollected: 0,
+            todayCollected: 0,
+            lastActivity: lastSeenAtStr,
+            status,
+            isActive: isLiveOnline,
+            isOnline: isLiveOnline,
+            lastSeenAt: lastSeenAtStr,
+          });
+        }
+      }
     }
 
-    const cashierPerformance = Array.from(cashierStatsMap.values()).sort((a, b) => b.totalSales - a.totalSales);
+    for (const inv of salesInvoices) {
+      const cId = inv.createdByUserId;
+      if (!cId) continue;
+      const current = cashierStatsMap.get(cId);
+      if (current) {
+        current.totalSales += inv.totalAmount;
+        current.invoiceCount += 1;
+        current.invoicesCreated += 1;
+        const invDate = inv.createdAt.toISOString();
+        if (!current.lastActivity || invDate > current.lastActivity) {
+          current.lastActivity = invDate;
+        }
+      }
+    }
 
-    // 8. Recent Sales Formatted
+    for (const q of allOrgQuotations) {
+      const cId = q.createdByUserId;
+      if (!cId) continue;
+      const current = cashierStatsMap.get(cId);
+      if (current) {
+        current.quotationsCreated += 1;
+        if (q.status === 'ACCEPTED') current.acceptedQuotations += 1;
+        const qDate = q.createdAt.toISOString();
+        if (!current.lastActivity || qDate > current.lastActivity) {
+          current.lastActivity = qDate;
+        }
+      }
+    }
+
+    for (const r of validReceipts) {
+      const cId = r.createdByUserId;
+      if (!cId) continue;
+      const current = cashierStatsMap.get(cId);
+      if (current) {
+        current.receiptsGenerated += 1;
+        current.totalCollected += r.amountPaid;
+        if (r.paymentDate >= startOfToday && r.paymentDate <= endOfToday) {
+          current.todayCollected += r.amountPaid;
+        }
+        const rDate = r.createdAt.toISOString();
+        if (!current.lastActivity || rDate > current.lastActivity) {
+          current.lastActivity = rDate;
+        }
+      }
+    }
+
+    const cashierPerformance = Array.from(cashierStatsMap.values()).sort(
+      (a, b) => b.totalSales - a.totalSales,
+    );
+
+    // 9. Recent Sales Formatted
     const recentSalesFormatted = recentInvoices.map((inv) => ({
       id: inv.id,
       invoiceNumber: inv.invoiceNumber,
       customerName: inv.customer?.name || 'Walk-in Customer',
       outletName: inv.outlet?.name || 'Main Branch',
-      cashierName: inv.createdByUserId ? cashierMap.get(inv.createdByUserId) || 'Cashier' : 'Counter POS',
+      cashierName: inv.createdByUserId
+        ? cashierUsersMap.get(inv.createdByUserId)?.name || 'Cashier'
+        : 'Counter POS',
       totalAmount: inv.totalAmount,
       paidAmount: inv.paidAmount,
       outstandingAmount: inv.outstandingAmount,
@@ -271,11 +524,22 @@ export class FinanceService {
       customerReceivables,
       supplierPayables,
       activeDiningTables,
-      totalInvoices: salesInvoices.length,
+      totalInvoices: allOrgInvoices.length,
+      todayInvoices: todayInvoicesCount,
       paidInvoices,
       partiallyPaidInvoices,
       unpaidInvoices,
       overdueInvoices,
+      totalInvoiced,
+      totalCollected,
+      totalOutstanding,
+      totalQuotations,
+      todayQuotations,
+      acceptedQuotations,
+      pendingQuotations,
+      convertedQuotations,
+      totalReceipts,
+      todayReceipts,
       outputGst,
       inputGst,
       netGstPayable,
@@ -297,18 +561,33 @@ export class FinanceService {
   // ---------------------------------------------------------
   // 2. Sales Invoices Management
   // ---------------------------------------------------------
-  async getSalesInvoices(tenantContext: TenantContext, query?: {
-    search?: string;
-    outletId?: string;
-    paymentStatus?: string;
-    customerId?: string;
-    startDate?: string;
-    endDate?: string;
-  }) {
+  async getSalesInvoices(
+    tenantContext: TenantContext,
+    query?: {
+      search?: string;
+      outletId?: string;
+      paymentStatus?: string;
+      customerId?: string;
+      cashierId?: string;
+      startDate?: string;
+      endDate?: string;
+    },
+    currentUserId?: string,
+  ) {
     const orgId = tenantContext.organizationId;
+    const isOwner = this.isOwnerOrManager(tenantContext);
+    const userId = currentUserId || tenantContext.userId;
     const outletId = this.getOutletFilter(tenantContext, query?.outletId);
 
     const where: any = { organizationId: orgId };
+
+    // Cashier Scope: Cashiers can only view their own invoices
+    if (!isOwner) {
+      where.createdByUserId = userId;
+    } else if (query?.cashierId && query.cashierId !== 'ALL') {
+      where.createdByUserId = query.cashierId;
+    }
+
     if (outletId) where.outletId = outletId;
     if (query?.paymentStatus && query.paymentStatus !== 'ALL') where.paymentStatus = query.paymentStatus;
     if (query?.customerId && query.customerId !== 'ALL') where.customerId = query.customerId;
@@ -316,12 +595,17 @@ export class FinanceService {
       where.OR = [
         { invoiceNumber: { contains: query.search, mode: 'insensitive' } },
         { customer: { name: { contains: query.search, mode: 'insensitive' } } },
+        { customer: { phone: { contains: query.search, mode: 'insensitive' } } },
       ];
     }
     if (query?.startDate || query?.endDate) {
       where.createdAt = {};
       if (query.startDate) where.createdAt.gte = new Date(query.startDate);
-      if (query.endDate) where.createdAt.lte = new Date(query.endDate);
+      if (query.endDate) {
+        const end = new Date(query.endDate);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt.lte = end;
+      }
     }
 
     return this.prisma.saleInvoice.findMany({
@@ -329,28 +613,57 @@ export class FinanceService {
       include: {
         customer: true,
         outlet: { select: { id: true, name: true, code: true } },
+        createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
         items: true,
         payments: true,
+        receipts: {
+          select: {
+            id: true,
+            receiptNumber: true,
+            amountPaid: true,
+            paymentMethod: true,
+            status: true,
+            paymentDate: true,
+          },
+        },
+        quotation: { select: { id: true, quotationNumber: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async getSalesInvoiceDetail(tenantContext: TenantContext, id: string) {
+  async getSalesInvoiceDetail(tenantContext: TenantContext, id: string, currentUserId?: string) {
+    const orgId = tenantContext.organizationId;
+    const isOwner = this.isOwnerOrManager(tenantContext);
+    const userId = currentUserId || tenantContext.userId;
+
     const invoice = await this.prisma.saleInvoice.findFirst({
-      where: { id, organizationId: tenantContext.organizationId },
+      where: {
+        id,
+        organizationId: orgId,
+        ...(!isOwner ? { createdByUserId: userId } : {}),
+      },
       include: {
         customer: true,
         outlet: true,
         organization: true,
+        createdByUser: { select: { id: true, firstName: true, lastName: true, email: true } },
         items: {
           include: { product: true },
         },
         payments: true,
+        receipts: {
+          include: {
+            createdByUser: { select: { id: true, firstName: true, lastName: true } },
+            voidedByUser: { select: { id: true, firstName: true, lastName: true } },
+          },
+          orderBy: { paymentDate: 'desc' },
+        },
+        quotation: true,
       },
     });
 
-    if (!invoice) throw new NotFoundException('Sales invoice not found.');
+    if (!invoice) throw new NotFoundException('Sales invoice not found or access denied.');
     return invoice;
   }
 
@@ -369,8 +682,12 @@ export class FinanceService {
         taxRate?: number;
       }[];
       discountPercent?: number;
-      paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'CREDIT';
+      additionalCharges?: number;
+      paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CREDIT';
       paidAmount?: number;
+      dueDate?: string;
+      isPosSale?: boolean;
+      termsAndConditions?: string;
       notes?: string;
     },
     currentUserId?: string,
@@ -380,6 +697,7 @@ export class FinanceService {
     }
     const orgId = tenantContext.organizationId;
     const outletId = dto.outletId || tenantContext.outletId;
+    const userId = currentUserId || tenantContext.userId;
 
     if (!outletId) {
       throw new BadRequestException('Branch / Outlet is required for billing.');
@@ -417,7 +735,7 @@ export class FinanceService {
         const hasRestrictions = p.outletAccess.length > 0 || p.cashierAccess.length > 0;
         if (hasRestrictions) {
           const matchesOutlet = outletId && p.outletAccess.some((oa) => oa.outletId === outletId);
-          const matchesUser = (currentUserId || tenantContext.userId) && p.cashierAccess.some((ca) => ca.userId === (currentUserId || tenantContext.userId));
+          const matchesUser = userId && p.cashierAccess.some((ca) => ca.userId === userId);
           if (!matchesOutlet && !matchesUser) {
             throw new ForbiddenException(
               `Access Denied: Product '${p.name}' is not authorized for your branch or cashier account.`,
@@ -428,12 +746,12 @@ export class FinanceService {
     }
 
     const discountPercent = Number(dto.discountPercent || 0);
+    const additionalCharges = Number(dto.additionalCharges || 0);
     let subtotal = 0;
     let totalDiscount = 0;
     let taxableAmount = 0;
     let cgstAmount = 0;
     let sgstAmount = 0;
-    let totalAmount = 0;
 
     const processedItems = dto.items.map((item) => {
       const qty = Number(item.quantity || 1);
@@ -454,7 +772,6 @@ export class FinanceService {
       taxableAmount += lineTaxable;
       cgstAmount += lineCgst;
       sgstAmount += lineSgst;
-      totalAmount += lineTotal;
 
       const dbProduct = item.productId ? productMap.get(item.productId) : null;
       const unitCost = Number(
@@ -479,28 +796,25 @@ export class FinanceService {
       };
     });
 
+    const totalAmount = taxableAmount + cgstAmount + sgstAmount + additionalCharges;
     const isCredit = dto.paymentMethod === 'CREDIT';
     const paidAmount = isCredit ? (Number(dto.paidAmount) || 0) : totalAmount;
     const outstandingAmount = Math.max(0, totalAmount - paidAmount);
     const paymentStatus = outstandingAmount === 0 ? 'PAID' : paidAmount > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
 
-    const count = await this.prisma.saleInvoice.count({
-      where: { organizationId: orgId },
-    });
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const invoiceNumber = `INV-${dateStr}-${String(count + 1).padStart(4, '0')}`;
-
     const activeSession = await this.prisma.registerSession.findFirst({
       where: {
         organizationId: orgId,
         outletId,
-        openedByUserId: currentUserId || tenantContext.userId,
+        openedByUserId: userId,
         status: 'OPEN',
       },
       orderBy: { openedAt: 'desc' },
     });
 
     return this.prisma.$transaction(async (tx) => {
+      const invoiceNumber = await generateDocumentNumber(tx, orgId, 'INVOICE');
+
       const invoice = await tx.saleInvoice.create({
         data: {
           invoiceNumber,
@@ -514,12 +828,16 @@ export class FinanceService {
           cgstAmount,
           sgstAmount,
           igstAmount: 0,
+          additionalCharges,
           totalAmount,
           paidAmount,
           outstandingAmount,
           paymentStatus,
-          isPosSale: true,
-          createdByUserId: currentUserId || tenantContext.userId || null,
+          isPosSale: dto.isPosSale !== undefined ? dto.isPosSale : true,
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          termsAndConditions: dto.termsAndConditions || null,
+          notes: dto.notes || null,
+          createdByUserId: userId || null,
           items: {
             create: processedItems,
           },
@@ -527,11 +845,8 @@ export class FinanceService {
       });
 
       if (paidAmount > 0) {
-        const paymentCount = await tx.payment.count({
-          where: { organizationId: orgId },
-        });
-        const paymentNumber = `RCP-${dateStr}-${String(paymentCount + 1).padStart(4, '0')}`;
-        await tx.payment.create({
+        const paymentNumber = await generateDocumentNumber(tx, orgId, 'RECEIPT');
+        const payment = await tx.payment.create({
           data: {
             paymentNumber,
             organizationId: orgId,
@@ -543,8 +858,28 @@ export class FinanceService {
             amount: paidAmount,
             paymentMethod: dto.paymentMethod || 'CASH',
             status: 'COMPLETED',
-            createdByUserId: currentUserId || tenantContext.userId || null,
+            createdByUserId: userId || null,
             notes: dto.notes || `Payment for ${invoiceNumber}`,
+          },
+        });
+
+        await tx.receipt.create({
+          data: {
+            receiptNumber: paymentNumber,
+            organizationId: orgId,
+            outletId,
+            invoiceId: invoice.id,
+            paymentId: payment.id,
+            customerId: dto.customerId || null,
+            amountPaid: paidAmount,
+            previouslyPaid: 0,
+            totalPaid: paidAmount,
+            remainingBalance: outstandingAmount,
+            paymentMethod: dto.paymentMethod || 'CASH',
+            paymentDate: new Date(),
+            status: 'ISSUED',
+            notes: dto.notes || `Receipt for ${invoiceNumber}`,
+            createdByUserId: userId || null,
           },
         });
 
@@ -556,6 +891,15 @@ export class FinanceService {
             },
           });
         }
+      }
+
+      if (dto.customerId && outstandingAmount > 0) {
+        await tx.customer.update({
+          where: { id: dto.customerId },
+          data: {
+            outstandingBalance: { increment: outstandingAmount },
+          },
+        });
       }
 
       for (const item of processedItems) {
@@ -573,7 +917,7 @@ export class FinanceService {
         data: {
           organizationId: orgId,
           outletId,
-          userId: currentUserId || tenantContext.userId || null,
+          userId: userId || null,
           action: 'SALE_INVOICE_CREATED',
           resource: 'SaleInvoice',
           resourceId: invoice.id,
@@ -587,6 +931,17 @@ export class FinanceService {
         },
       });
 
+      this.presenceGateway.broadcastEvent(orgId, 'invoice:created', {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        customerId: invoice.customerId,
+        totalAmount: invoice.totalAmount,
+        paidAmount: invoice.paidAmount,
+        outstandingAmount: invoice.outstandingAmount,
+        paymentStatus: invoice.paymentStatus,
+        createdByUserId: userId,
+      });
+
       return tx.saleInvoice.findUnique({
         where: { id: invoice.id },
         include: {
@@ -597,8 +952,285 @@ export class FinanceService {
           organization: true,
           customer: true,
           payments: true,
+          receipts: true,
         },
       });
+    });
+  }
+
+  async recordInvoicePayment(
+    tenantContext: TenantContext,
+    invoiceId: string,
+    dto: {
+      amount: number;
+      paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER';
+      referenceNumber?: string;
+      notes?: string;
+    },
+    currentUserId?: string,
+  ) {
+    const orgId = tenantContext.organizationId;
+    const userId = currentUserId || tenantContext.userId;
+    const isOwner = this.isOwnerOrManager(tenantContext);
+
+    const amount = Number(dto.amount);
+    if (isNaN(amount) || amount <= 0) {
+      throw new BadRequestException('Payment amount must be greater than zero.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.saleInvoice.findFirst({
+        where: {
+          id: invoiceId,
+          organizationId: orgId,
+          ...(!isOwner ? { createdByUserId: userId } : {}),
+        },
+      });
+
+      if (!invoice) {
+        throw new NotFoundException('Invoice not found or access denied.');
+      }
+
+      if (invoice.paymentStatus === 'PAID' || invoice.outstandingAmount <= 0) {
+        throw new BadRequestException('This invoice is already fully paid.');
+      }
+
+      if (amount > invoice.outstandingAmount) {
+        throw new BadRequestException(
+          `Payment amount (₹${amount.toFixed(2)}) exceeds outstanding balance (₹${invoice.outstandingAmount.toFixed(2)}).`,
+        );
+      }
+
+      const paymentNumber = await generateDocumentNumber(tx, orgId, 'RECEIPT');
+      const activeSession = await tx.registerSession.findFirst({
+        where: {
+          organizationId: orgId,
+          openedByUserId: userId,
+          status: 'OPEN',
+        },
+        orderBy: { openedAt: 'desc' },
+      });
+
+      const newPaid = invoice.paidAmount + amount;
+      const newOutstanding = Math.max(0, invoice.totalAmount - newPaid);
+      const newPaymentStatus =
+        newOutstanding === 0 ? 'PAID' : 'PARTIALLY_PAID';
+
+      const payment = await tx.payment.create({
+        data: {
+          paymentNumber,
+          organizationId: orgId,
+          outletId: invoice.outletId,
+          type: 'CUSTOMER_RECEIPT',
+          customerId: invoice.customerId,
+          invoiceId: invoice.id,
+          registerSessionId: activeSession?.id || null,
+          amount,
+          paymentMethod: dto.paymentMethod,
+          referenceNumber: dto.referenceNumber || null,
+          status: 'COMPLETED',
+          createdByUserId: userId || null,
+          notes: dto.notes || `Payment towards ${invoice.invoiceNumber}`,
+        },
+      });
+
+      const receipt = await tx.receipt.create({
+        data: {
+          receiptNumber: paymentNumber,
+          organizationId: orgId,
+          outletId: invoice.outletId,
+          invoiceId: invoice.id,
+          paymentId: payment.id,
+          customerId: invoice.customerId,
+          amountPaid: amount,
+          previouslyPaid: invoice.paidAmount,
+          totalPaid: newPaid,
+          remainingBalance: newOutstanding,
+          paymentMethod: dto.paymentMethod,
+          referenceNumber: dto.referenceNumber || null,
+          paymentDate: new Date(),
+          status: 'ISSUED',
+          notes: dto.notes || `Payment towards ${invoice.invoiceNumber}`,
+          createdByUserId: userId || null,
+        },
+      });
+
+      await tx.saleInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          paidAmount: newPaid,
+          outstandingAmount: newOutstanding,
+          paymentStatus: newPaymentStatus,
+        },
+      });
+
+      if (invoice.customerId) {
+        await tx.customer.update({
+          where: { id: invoice.customerId },
+          data: {
+            outstandingBalance: { decrement: amount },
+          },
+        });
+      }
+
+      if (dto.paymentMethod === 'CASH' && activeSession) {
+        await tx.registerSession.update({
+          where: { id: activeSession.id },
+          data: {
+            cashSales: { increment: amount },
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          outletId: invoice.outletId,
+          userId: userId || null,
+          action: 'INVOICE_PAYMENT_RECORDED',
+          resource: 'SaleInvoice',
+          resourceId: invoice.id,
+          afterState: JSON.stringify({
+            invoiceNumber: invoice.invoiceNumber,
+            receiptNumber: paymentNumber,
+            amountPaid: amount,
+            newOutstanding,
+            newPaymentStatus,
+          }),
+        },
+      });
+
+      this.presenceGateway.broadcastEvent(orgId, 'receipt:generated', {
+        id: receipt.id,
+        receiptNumber: receipt.receiptNumber,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        amountPaid: amount,
+        createdByUserId: userId,
+      });
+
+      this.presenceGateway.broadcastEvent(orgId, 'invoice:updated', {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        paidAmount: newPaid,
+        outstandingAmount: newOutstanding,
+        paymentStatus: newPaymentStatus,
+      });
+
+      return {
+        payment,
+        receipt,
+        invoice: {
+          id: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          paidAmount: newPaid,
+          outstandingAmount: newOutstanding,
+          paymentStatus: newPaymentStatus,
+        },
+      };
+    });
+  }
+
+  async cancelSalesInvoice(
+    tenantContext: TenantContext,
+    id: string,
+    reason: string,
+    currentUserId?: string,
+  ) {
+    const orgId = tenantContext.organizationId;
+    const isOwner = this.isOwnerOrManager(tenantContext);
+    const userId = currentUserId || tenantContext.userId;
+
+    if (!reason || reason.trim().length === 0) {
+      throw new BadRequestException('A reason is required to cancel an invoice.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.saleInvoice.findFirst({
+        where: {
+          id,
+          organizationId: orgId,
+          ...(!isOwner ? { createdByUserId: userId } : {}),
+        },
+        include: {
+          items: true,
+          payments: { where: { status: 'COMPLETED' } },
+        },
+      });
+
+      if (!invoice) {
+        throw new NotFoundException('Invoice not found or access denied.');
+      }
+
+      if (invoice.paymentStatus === 'CANCELLED') {
+        throw new BadRequestException('Invoice is already cancelled.');
+      }
+
+      if (invoice.payments.length > 0 && invoice.paidAmount > 0) {
+        throw new BadRequestException(
+          'Cannot cancel an invoice with active payments. Please void all associated receipts/payments first.',
+        );
+      }
+
+      // 1. Restore product stock
+      for (const item of invoice.items) {
+        if (item.productId) {
+          await tx.product.updateMany({
+            where: { id: item.productId, organizationId: orgId },
+            data: {
+              stockQty: { increment: item.quantity },
+            },
+          });
+        }
+      }
+
+      // 2. Adjust customer balance if credit outstanding existed
+      if (invoice.customerId && invoice.outstandingAmount > 0) {
+        await tx.customer.update({
+          where: { id: invoice.customerId },
+          data: {
+            outstandingBalance: { decrement: invoice.outstandingAmount },
+          },
+        });
+      }
+
+      // 3. Mark invoice as CANCELLED
+      const updated = await tx.saleInvoice.update({
+        where: { id },
+        data: {
+          paymentStatus: 'CANCELLED',
+          cancelReason: reason,
+        },
+        include: {
+          customer: true,
+          outlet: true,
+          items: true,
+        },
+      });
+
+      // Audit Log
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          outletId: invoice.outletId,
+          userId: userId || null,
+          action: 'SALE_INVOICE_CANCELLED',
+          resource: 'SaleInvoice',
+          resourceId: invoice.id,
+          afterState: JSON.stringify({
+            invoiceNumber: invoice.invoiceNumber,
+            cancelReason: reason,
+          }),
+        },
+      });
+
+      this.presenceGateway.broadcastEvent(orgId, 'invoice:cancelled', {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        cancelReason: reason,
+      });
+
+      return updated;
     });
   }
 
@@ -1431,6 +2063,51 @@ export class FinanceService {
   }
 
   // ---------------------------------------------------------
+  // 12.1 Customers Management
+  // ---------------------------------------------------------
+  async getCustomers(tenantContext: TenantContext, query?: { search?: string }) {
+    const orgId = tenantContext.organizationId;
+    const where: any = { organizationId: orgId };
+    if (query?.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { phone: { contains: query.search, mode: 'insensitive' } },
+        { email: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
+    return this.prisma.customer.findMany({
+      where,
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createCustomer(
+    tenantContext: TenantContext,
+    dto: {
+      name: string;
+      phone?: string;
+      email?: string;
+      taxNumber?: string;
+      billingAddress?: string;
+      creditLimit?: number;
+    },
+  ) {
+    const orgId = tenantContext.organizationId;
+    if (!dto.name) throw new BadRequestException('Customer name is required.');
+    return this.prisma.customer.create({
+      data: {
+        organizationId: orgId,
+        name: dto.name,
+        phone: dto.phone || null,
+        email: dto.email || null,
+        taxNumber: dto.taxNumber || null,
+        billingAddress: dto.billingAddress || null,
+        creditLimit: Number(dto.creditLimit || 0),
+      },
+    });
+  }
+
+  // ---------------------------------------------------------
   // 13. Cashier Live Dashboard Metrics
   // ---------------------------------------------------------
   async getCashierDashboard(tenantContext: TenantContext) {
@@ -1567,6 +2244,75 @@ export class FinanceService {
     const shiftTotalSales = completedCashSales + shiftDigitalAndUpi;
     const shiftSalesCount = shiftInvoices.length;
 
+    // 4. Cashier-specific Quotations, Invoices, and Receipts stats & recent records
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const [
+      myTotalQuotationsCount,
+      myAcceptedQuotationsCount,
+      myTotalInvoicesCount,
+      myPaidInvoicesCount,
+      myUnpaidInvoicesCount,
+      myTotalReceiptsCount,
+      myAllReceipts,
+      recentQuotations,
+      recentInvoices,
+      recentReceipts,
+    ] = await Promise.all([
+      this.prisma.quotation.count({
+        where: { organizationId: orgId, createdByUserId: userId },
+      }),
+      this.prisma.quotation.count({
+        where: { organizationId: orgId, createdByUserId: userId, status: 'ACCEPTED' },
+      }),
+      this.prisma.saleInvoice.count({
+        where: { organizationId: orgId, createdByUserId: userId },
+      }),
+      this.prisma.saleInvoice.count({
+        where: { organizationId: orgId, createdByUserId: userId, paymentStatus: 'PAID' },
+      }),
+      this.prisma.saleInvoice.count({
+        where: {
+          organizationId: orgId,
+          createdByUserId: userId,
+          paymentStatus: { in: ['UNPAID', 'PARTIALLY_PAID', 'OVERDUE'] },
+        },
+      }),
+      this.prisma.receipt.count({
+        where: { organizationId: orgId, createdByUserId: userId, status: { not: 'VOIDED' } },
+      }),
+      this.prisma.receipt.findMany({
+        where: { organizationId: orgId, createdByUserId: userId, status: { not: 'VOIDED' } },
+        select: { amountPaid: true, paymentDate: true },
+      }),
+      this.prisma.quotation.findMany({
+        where: { organizationId: orgId, createdByUserId: userId },
+        include: { customer: true },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+      this.prisma.saleInvoice.findMany({
+        where: { organizationId: orgId, createdByUserId: userId },
+        include: { customer: true },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      }),
+      this.prisma.receipt.findMany({
+        where: { organizationId: orgId, createdByUserId: userId },
+        include: { customer: true, invoice: { select: { invoiceNumber: true } } },
+        orderBy: { paymentDate: 'desc' },
+        take: 5,
+      }),
+    ]);
+
+    const myTotalCollection = myAllReceipts.reduce((sum, r) => sum + r.amountPaid, 0);
+    const myTodayCollection = myAllReceipts
+      .filter((r) => r.paymentDate >= todayStart && r.paymentDate <= todayEnd)
+      .reduce((sum, r) => sum + r.amountPaid, 0);
+
     return {
       hasActiveShift: true,
       shift: {
@@ -1585,6 +2331,17 @@ export class FinanceService {
       heldOrdersCount,
       heldOrdersTotal,
       heldOrders: formattedHeldOrders,
+      myTotalQuotationsCount,
+      myAcceptedQuotationsCount,
+      myTotalInvoicesCount,
+      myPaidInvoicesCount,
+      myUnpaidInvoicesCount,
+      myTotalReceiptsCount,
+      myTotalCollection,
+      myTodayCollection,
+      recentQuotations,
+      recentInvoices,
+      recentReceipts,
       message: null,
     };
   }

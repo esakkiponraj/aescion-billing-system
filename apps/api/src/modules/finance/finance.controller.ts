@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -10,6 +11,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { FinanceService } from './finance.service';
+import { QuotationsService } from './quotations.service';
+import { ReceiptsService } from './receipts.service';
 import { CurrentTenant } from '../../common/decorators/current-tenant.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
@@ -21,7 +24,11 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 @Controller('finance')
 export class FinanceController {
-  constructor(private readonly financeService: FinanceService) {}
+  constructor(
+    private readonly financeService: FinanceService,
+    private readonly quotationsService: QuotationsService,
+    private readonly receiptsService: ReceiptsService,
+  ) {}
 
   @Get('dashboard')
   @RequirePermissions(Permissions.REPORTS_SALES_READ)
@@ -34,37 +41,144 @@ export class FinanceController {
     return this.financeService.getDashboardSummary(tenant, { outletId, startDate, endDate });
   }
 
-  @Get('sales-invoices')
+  // ---------------------------------------------------------
+  // Quotations Management
+  // ---------------------------------------------------------
+  @Get('quotations')
+  @RequirePermissions(Permissions.SALES_READ)
+  async getQuotations(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('customerId') customerId?: string,
+    @Query('cashierId') cashierId?: string,
+    @Query('outletId') outletId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.quotationsService.getQuotations(
+      tenant,
+      { search, status, customerId, cashierId, outletId, startDate, endDate },
+      currentUserId,
+    );
+  }
+
+  @Get('quotations/:id')
+  @RequirePermissions(Permissions.SALES_READ)
+  async getQuotationDetail(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+  ) {
+    return this.quotationsService.getQuotationDetail(tenant, id, currentUserId);
+  }
+
+  @Post('quotations')
+  @RequirePermissions(Permissions.SALES_CREATE)
+  async createQuotation(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Body() dto: any,
+  ) {
+    return this.quotationsService.createQuotation(tenant, dto, currentUserId);
+  }
+
+  @Put('quotations/:id')
+  @RequirePermissions(Permissions.SALES_CREATE)
+  async updateQuotation(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+    @Body() dto: any,
+  ) {
+    return this.quotationsService.updateQuotation(tenant, id, dto, currentUserId);
+  }
+
+  @Patch('quotations/:id/status')
+  @RequirePermissions(Permissions.SALES_CREATE)
+  async updateQuotationStatus(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+    @Body() dto: { status: string; reason?: string },
+  ) {
+    return this.quotationsService.updateQuotationStatus(
+      tenant,
+      id,
+      dto.status,
+      dto.reason,
+      currentUserId,
+    );
+  }
+
+  @Post('quotations/:id/convert')
+  @RequirePermissions(Permissions.SALES_CREATE)
+  async convertQuotationToInvoice(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+    @Body() dto: {
+      paymentMethod?: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CREDIT';
+      paidAmount?: number;
+      notes?: string;
+    },
+  ) {
+    return this.quotationsService.convertToInvoice(tenant, id, dto, currentUserId);
+  }
+
+  @Post('quotations/:id/duplicate')
+  @RequirePermissions(Permissions.SALES_CREATE)
+  async duplicateQuotation(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+  ) {
+    return this.quotationsService.duplicateQuotation(tenant, id, currentUserId);
+  }
+
+  // ---------------------------------------------------------
+  // Sales Invoices Management
+  // ---------------------------------------------------------
+  @Get(['sales-invoices', 'invoices'])
   @RequirePermissions(Permissions.SALES_READ)
   async getSalesInvoices(
     @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
     @Query('search') search?: string,
     @Query('outletId') outletId?: string,
     @Query('paymentStatus') paymentStatus?: string,
     @Query('customerId') customerId?: string,
+    @Query('cashierId') cashierId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.financeService.getSalesInvoices(tenant, {
-      search,
-      outletId,
-      paymentStatus,
-      customerId,
-      startDate,
-      endDate,
-    });
+    return this.financeService.getSalesInvoices(
+      tenant,
+      {
+        search,
+        outletId,
+        paymentStatus,
+        customerId,
+        cashierId,
+        startDate,
+        endDate,
+      },
+      currentUserId,
+    );
   }
 
-  @Get('sales-invoices/:id')
+  @Get(['sales-invoices/:id', 'invoices/:id'])
   @RequirePermissions(Permissions.SALES_READ)
   async getSalesInvoiceDetail(
     @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
     @Param('id') id: string,
   ) {
-    return this.financeService.getSalesInvoiceDetail(tenant, id);
+    return this.financeService.getSalesInvoiceDetail(tenant, id, currentUserId);
   }
 
-  @Post('sales-invoices')
+  @Post(['sales-invoices', 'invoices'])
   @RequirePermissions(Permissions.SALES_CREATE)
   async createSalesInvoice(
     @CurrentTenant() tenant: TenantContext,
@@ -74,6 +188,92 @@ export class FinanceController {
     return this.financeService.createSalesInvoice(tenant, dto, currentUserId);
   }
 
+  @Post(['sales-invoices/:id/payments', 'invoices/:id/payments'])
+  @RequirePermissions(Permissions.SALES_CREATE)
+  async recordInvoicePayment(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+    @Body() dto: {
+      amount: number;
+      paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER';
+      referenceNumber?: string;
+      notes?: string;
+    },
+  ) {
+    return this.financeService.recordInvoicePayment(tenant, id, dto, currentUserId);
+  }
+
+  @Post(['sales-invoices/:id/cancel', 'invoices/:id/cancel'])
+  @RequirePermissions(Permissions.SALES_CREATE)
+  async cancelSalesInvoice(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+    @Body() dto: { reason: string },
+  ) {
+    return this.financeService.cancelSalesInvoice(tenant, id, dto.reason, currentUserId);
+  }
+
+  // ---------------------------------------------------------
+  // Receipts Management
+  // ---------------------------------------------------------
+  @Get('receipts')
+  @RequirePermissions(Permissions.SALES_READ)
+  async getReceipts(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('customerId') customerId?: string,
+    @Query('invoiceId') invoiceId?: string,
+    @Query('cashierId') cashierId?: string,
+    @Query('paymentMethod') paymentMethod?: string,
+    @Query('outletId') outletId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.receiptsService.getReceipts(
+      tenant,
+      {
+        search,
+        status,
+        customerId,
+        invoiceId,
+        cashierId,
+        paymentMethod,
+        outletId,
+        startDate,
+        endDate,
+      },
+      currentUserId,
+    );
+  }
+
+  @Get('receipts/:id')
+  @RequirePermissions(Permissions.SALES_READ)
+  async getReceiptDetail(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+  ) {
+    return this.receiptsService.getReceiptDetail(tenant, id, currentUserId);
+  }
+
+  @Post('receipts/:id/void')
+  @RequirePermissions(Permissions.SALES_READ)
+  async voidReceipt(
+    @CurrentTenant() tenant: TenantContext,
+    @CurrentUser('id') currentUserId: string,
+    @Param('id') id: string,
+    @Body() dto: { reason: string },
+  ) {
+    return this.receiptsService.voidReceipt(tenant, id, dto.reason, currentUserId);
+  }
+
+  // ---------------------------------------------------------
+  // Purchase Bills Management
+  // ---------------------------------------------------------
   @Get('purchase-bills')
   @RequirePermissions(Permissions.PURCHASE_READ)
   async getPurchaseBills(
@@ -250,24 +450,29 @@ export class FinanceController {
     return this.financeService.getProducts(tenant, { search, category });
   }
 
-  @Post('products')
-  @RequirePermissions(Permissions.SALES_CREATE)
-  async createProduct(
+  @Get('customers')
+  @RequirePermissions(Permissions.CUSTOMERS_READ)
+  async getCustomers(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('search') search?: string,
+  ) {
+    return this.financeService.getCustomers(tenant, { search });
+  }
+
+  @Post('customers')
+  @RequirePermissions(Permissions.CUSTOMERS_MANAGE)
+  async createCustomer(
     @CurrentTenant() tenant: TenantContext,
     @Body() dto: {
       name: string;
-      sku: string;
-      barcode?: string;
-      category?: string;
-      costPrice?: number;
-      sellingPrice: number;
-      taxRate?: number;
-      stockQty?: number;
-      assignedOutletIds?: string[];
-      assignedUserIds?: string[];
+      phone?: string;
+      email?: string;
+      taxNumber?: string;
+      billingAddress?: string;
+      creditLimit?: number;
     },
   ) {
-    return this.financeService.createProduct(tenant, dto);
+    return this.financeService.createCustomer(tenant, dto);
   }
 
   @Get('cashier-dashboard')
@@ -285,16 +490,6 @@ export class FinanceController {
   @Post('shifts/open')
   @RequirePermissions(Permissions.SALES_READ)
   async openShift(
-    @CurrentTenant() tenant: TenantContext,
-    @CurrentUser('id') currentUserId: string,
-    @Body() dto: { openingFloat?: number; openingCash?: number; registerId?: string },
-  ) {
-    return this.financeService.openShift(tenant, dto, currentUserId);
-  }
-
-  @Post('shifts/start')
-  @RequirePermissions(Permissions.SALES_READ)
-  async startShift(
     @CurrentTenant() tenant: TenantContext,
     @CurrentUser('id') currentUserId: string,
     @Body() dto: { openingFloat?: number; openingCash?: number; registerId?: string },

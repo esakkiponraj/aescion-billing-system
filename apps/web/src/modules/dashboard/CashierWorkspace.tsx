@@ -224,29 +224,30 @@ export const CashierWorkspace: React.FC = () => {
   };
   const shiftCash = dashboardData?.shiftCashInRegister ?? 0;
   const shiftDigital = dashboardData?.shiftDigitalAndUpi ?? 0;
+  const shiftTransactions = dashboardData?.shiftTransactionsCount ?? 0;
   const heldOrders: HeldOrderItem[] = dashboardData?.heldOrders ?? [];
   const heldCount = dashboardData?.heldOrdersCount ?? heldOrders.length;
   const heldTotal = dashboardData?.heldOrdersTotal ?? 0;
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Top Shift Status & Action Hero */}
-      <div className="p-6 sm:p-8 rounded-2xl bg-white border border-slate-200 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="space-y-1.5">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto w-full">
+      {/* Cashier Greeting & Shift Action Hero Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 sm:p-6 rounded-xl bg-white border border-slate-200 shadow-sm w-full">
+        <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span
-              className={`w-2.5 h-2.5 rounded-full ${hasActiveShift ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}
+              className={`w-2.5 h-2.5 rounded-full ${hasActiveShift ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'} shrink-0`}
             />
             <span
-              className={`text-xs font-bold uppercase tracking-widest ${hasActiveShift ? 'text-emerald-600' : 'text-amber-600'}`}
+              className={`text-xs font-bold uppercase tracking-widest ${hasActiveShift ? 'text-emerald-700' : 'text-amber-700'}`}
             >
               {hasActiveShift ? `Shift Active • ${activeOutletName}` : `No Active Shift • ${activeOutletName}`}
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
             Hi, {user?.firstName || 'Cashier'}!
           </h1>
-          <p className="text-xs text-slate-500 max-w-md">
+          <p className="text-xs text-slate-500 max-w-md break-words">
             {hasActiveShift ? (
               <>
                 Register shift active since{' '}
@@ -262,13 +263,14 @@ export const CashierWorkspace: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full md:w-auto shrink-0">
           <Button
             size="md"
             variant="outline"
             onClick={() => fetchCashierDashboard(true)}
             isLoading={isRefreshing}
-            leftIcon={<RefreshCw className="w-4 h-4" />}
+            leftIcon={<RefreshCw className="w-4 h-4 shrink-0" />}
+            className="w-full sm:w-auto h-10 text-xs font-bold justify-center"
           >
             Refresh
           </Button>
@@ -279,35 +281,35 @@ export const CashierWorkspace: React.FC = () => {
                 size="md"
                 variant="outline"
                 onClick={() => setIsCloseShiftModalOpen(true)}
-                leftIcon={<Lock className="w-4 h-4 text-slate-500" />}
-                className="text-slate-700 hover:text-rose-600 hover:border-rose-300"
+                leftIcon={<Lock className="w-4 h-4 text-slate-500 shrink-0" />}
+                className="w-full sm:w-auto h-10 text-xs font-bold text-slate-700 hover:text-rose-600 hover:border-rose-300 justify-center"
               >
                 Close Shift
               </Button>
               <Button
-                size="lg"
+                size="md"
                 onClick={() => navigate('/pos')}
-                className="shadow-md shadow-brand-500/20 text-sm font-bold"
-                leftIcon={<ShoppingCart className="w-5 h-5" />}
+                className="w-full sm:w-auto h-10 text-xs font-bold shadow-md shadow-brand-500/20 justify-center truncate"
+                leftIcon={<ShoppingCart className="w-4 h-4 shrink-0" />}
               >
-                Open POS Register (F2)
+                <span className="truncate">Open POS Register (F2)</span>
               </Button>
             </>
           ) : (
             <Button
-              size="lg"
+              size="md"
               onClick={() => setIsStartShiftModalOpen(true)}
-              className="shadow-md shadow-brand-500/20 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
-              leftIcon={<Unlock className="w-5 h-5" />}
+              className="w-full sm:w-auto h-10 text-xs font-bold shadow-md shadow-brand-500/20 bg-emerald-600 hover:bg-emerald-700 text-white justify-center truncate"
+              leftIcon={<Unlock className="w-4 h-4 shrink-0" />}
             >
-              Start Shift (F2)
+              <span className="truncate">Start Shift (F2)</span>
             </Button>
           )}
         </div>
       </div>
 
       {dashboardError && (
-        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between gap-4">
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 w-full">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
             <div>
@@ -319,7 +321,7 @@ export const CashierWorkspace: React.FC = () => {
             size="sm"
             onClick={() => fetchCashierDashboard(true)}
             variant="outline"
-            className="border-rose-300 text-rose-700 hover:bg-rose-100 shrink-0"
+            className="border-rose-300 text-rose-700 hover:bg-rose-100 shrink-0 w-full sm:w-auto"
             isLoading={isRefreshing}
           >
             Retry
@@ -329,7 +331,7 @@ export const CashierWorkspace: React.FC = () => {
 
       {statusMessage && (
         <div
-          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-medium ${
+          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-medium w-full ${
             statusMessage.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
               : 'bg-rose-50 border-rose-200 text-rose-700'
@@ -347,7 +349,7 @@ export const CashierWorkspace: React.FC = () => {
 
       {/* Inactive Shift Banner */}
       {!hasActiveShift && (
-        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-4">
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 w-full">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
             <div>
@@ -360,7 +362,7 @@ export const CashierWorkspace: React.FC = () => {
           <Button
             size="sm"
             onClick={() => setIsStartShiftModalOpen(true)}
-            className="bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+            className="bg-amber-600 hover:bg-amber-700 text-white shrink-0 w-full sm:w-auto"
           >
             Start Shift Now
           </Button>
@@ -368,61 +370,134 @@ export const CashierWorkspace: React.FC = () => {
       )}
 
       {/* Cashier Quick Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
         {/* Shift Cash in Register */}
-        <Card variant="solid" className="p-5 space-y-2 border-l-4 border-l-brand-600 shadow-sm">
-          <div className="flex items-center justify-between text-xs text-slate-500">
-            <span className="font-bold uppercase tracking-wider text-slate-700">Shift Cash In Register</span>
-            <Badge variant={hasActiveShift ? 'brand' : 'neutral'} size="sm" dot={hasActiveShift}>
+        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 border-l-brand-600 shadow-sm space-y-2 w-full">
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <span className="font-bold uppercase tracking-wider text-slate-700 text-xs truncate">Shift Cash In Register</span>
+            <Badge variant={hasActiveShift ? 'brand' : 'neutral'} size="sm" dot={hasActiveShift} className="shrink-0 whitespace-nowrap">
               {hasActiveShift ? 'Live' : 'Shift Closed'}
             </Badge>
           </div>
-          <p className="text-3xl font-black text-slate-900">
+          <p className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 font-mono tracking-tight truncate">
             ₹{shiftCash.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-[11px] text-slate-500 leading-snug truncate">
             {hasActiveShift
               ? `Opening float: ₹${(dashboardData?.shift?.openingFloat ?? 0).toLocaleString()}`
               : 'Start a shift to begin billing'}
           </p>
-        </Card>
+        </div>
 
         {/* Shift Digital & UPI */}
-        <Card variant="solid" className="p-5 space-y-2 border-l-4 border-l-emerald-500 shadow-sm">
-          <div className="flex items-center justify-between text-xs text-slate-500">
-            <span className="font-bold uppercase tracking-wider text-slate-700">Shift Digital & UPI</span>
-            <Badge variant={hasActiveShift ? 'success' : 'neutral'} size="sm">
+        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 border-l-emerald-500 shadow-sm space-y-2 w-full">
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <span className="font-bold uppercase tracking-wider text-slate-700 text-xs truncate">Shift Digital & UPI</span>
+            <Badge variant={hasActiveShift ? 'success' : 'neutral'} size="sm" className="shrink-0 whitespace-nowrap">
               {hasActiveShift ? 'Synced' : 'Inactive'}
             </Badge>
           </div>
-          <p className="text-3xl font-black text-emerald-600">
+          <p className="text-xl sm:text-2xl lg:text-3xl font-black text-emerald-600 font-mono tracking-tight truncate">
             ₹{shiftDigital.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
-          <p className="text-xs text-slate-500">UPI, QR, Cards & Digital payments</p>
-        </Card>
+          <p className="text-[11px] text-slate-500 leading-snug truncate">
+            UPI, QR, Cards & Digital payments
+          </p>
+        </div>
 
         {/* Held Orders */}
-        <Card variant="solid" className="p-5 space-y-2 border-l-4 border-l-orange-500 shadow-sm">
-          <div className="flex items-center justify-between text-xs text-slate-500">
-            <span className="font-bold uppercase tracking-wider text-slate-700">Held Orders</span>
-            <Badge variant={heldCount > 0 ? 'warning' : 'neutral'} size="sm">
+        <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 border-l-4 border-l-orange-500 shadow-sm space-y-2 w-full">
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <span className="font-bold uppercase tracking-wider text-slate-700 text-xs truncate">Held Orders</span>
+            <Badge variant={heldCount > 0 ? 'warning' : 'neutral'} size="sm" className="shrink-0 whitespace-nowrap">
               {heldCount} Active
             </Badge>
           </div>
-          <p className="text-3xl font-black text-orange-600">{heldCount}</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xl sm:text-2xl lg:text-3xl font-black text-orange-600 font-mono tracking-tight truncate">
+            {heldCount}
+          </p>
+          <p className="text-[11px] text-slate-500 leading-snug truncate">
             {heldCount > 0 ? `Total: ₹${heldTotal.toLocaleString()}` : 'No parked tickets on this counter'}
           </p>
-        </Card>
+        </div>
+      </div>
+
+      {/* Cashier Commercial Documents Quick Access */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
+        {/* Quotations */}
+        <div
+          onClick={() => navigate('/quotations')}
+          className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-2xs hover:border-amber-400 hover:shadow-xs transition-all cursor-pointer group w-full"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 truncate">My Quotations</span>
+            <span className="text-xs font-bold text-amber-600 group-hover:translate-x-0.5 transition-transform shrink-0">View &rarr;</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-2 mt-2">
+            <p className="text-xl sm:text-2xl font-black text-slate-900 font-mono">
+              {dashboardData?.myTotalQuotations ?? 0}
+            </p>
+            <span className="text-xs font-bold text-emerald-600 truncate">
+              {dashboardData?.myAcceptedQuotations ?? 0} Accepted
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1 truncate">
+            {dashboardData?.myPendingQuotations ?? 0} pending customer acceptance
+          </p>
+        </div>
+
+        {/* Invoices */}
+        <div
+          onClick={() => navigate('/invoices')}
+          className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-2xs hover:border-blue-400 hover:shadow-xs transition-all cursor-pointer group w-full"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 truncate">My Invoices</span>
+            <span className="text-xs font-bold text-blue-600 group-hover:translate-x-0.5 transition-transform shrink-0">View &rarr;</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-2 mt-2">
+            <p className="text-xl sm:text-2xl font-black text-slate-900 font-mono">
+              {dashboardData?.myTotalInvoices ?? 0}
+            </p>
+            <span className="text-xs font-bold text-brand-700 truncate">
+              ₹{(dashboardData?.myTotalInvoiced ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1 truncate">
+            {dashboardData?.myPaidInvoices ?? 0} fully settled invoices
+          </p>
+        </div>
+
+        {/* Receipts */}
+        <div
+          onClick={() => navigate('/receipts')}
+          className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-2xs hover:border-emerald-400 hover:shadow-xs transition-all cursor-pointer group w-full"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 truncate">My Receipts</span>
+            <span className="text-xs font-bold text-emerald-600 group-hover:translate-x-0.5 transition-transform shrink-0">View &rarr;</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-2 mt-2">
+            <p className="text-xl sm:text-2xl font-black text-slate-900 font-mono">
+              {dashboardData?.myTotalReceipts ?? 0}
+            </p>
+            <span className="text-xs font-bold text-emerald-600 truncate">
+              ₹{(dashboardData?.myTotalCollected ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1 truncate">
+            Official payment receipts issued
+          </p>
+        </div>
       </div>
 
       {/* Parked / Held Bills Queue */}
-      <Card variant="solid" className="p-6 space-y-4 shadow-sm border-slate-200">
-        <div className="flex items-center justify-between">
+      <Card variant="solid" className="p-4 sm:p-6 space-y-4 shadow-sm border-slate-200 w-full">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <PauseCircle className="w-5 h-5 text-orange-500" />
+            <PauseCircle className="w-5 h-5 text-orange-500 shrink-0" />
             <div>
-              <h2 className="text-base font-bold text-slate-900">Held Bills & Parked Carts</h2>
+              <h2 className="text-sm sm:text-base font-bold text-slate-900">Held Bills & Parked Carts</h2>
               <p className="text-xs text-slate-500">
                 Resume customer carts with delayed payments without stalling checkout queues.
               </p>
@@ -433,6 +508,7 @@ export const CashierWorkspace: React.FC = () => {
             variant="outline"
             onClick={() => navigate('/pos')}
             leftIcon={<ShoppingCart className="w-4 h-4" />}
+            className="w-full sm:w-auto shrink-0"
           >
             Go to Billing POS
           </Button>
@@ -557,7 +633,7 @@ export const CashierWorkspace: React.FC = () => {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
             <div>
               <p className="text-slate-500">Expected Cash in Drawer:</p>
               <p className="text-lg font-black text-slate-900">₹{shiftCash.toLocaleString()}</p>

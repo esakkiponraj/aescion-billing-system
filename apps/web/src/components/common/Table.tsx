@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -41,11 +41,11 @@ export function Table<T extends Record<string, any>>({
 
   return (
     <div className={twMerge('w-full overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm', className)}>
-      <table className="w-full text-left border-collapse">
+      <table className="w-full text-left border-collapse min-w-[600px]">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50/90 text-xs font-bold uppercase tracking-wider text-slate-600">
             {columns.map((col, idx) => (
-              <th key={idx} className={twMerge('px-5 py-3.5', col.className)}>
+              <th key={idx} className={twMerge('px-3 sm:px-5 py-3 sm:py-3.5', col.className)}>
                 {col.header}
               </th>
             ))}
@@ -56,7 +56,7 @@ export function Table<T extends Record<string, any>>({
             <tr>
               <td
                 colSpan={columns.length}
-                className="px-5 py-8 text-center text-sm text-slate-500 font-medium"
+                className="px-3 sm:px-5 py-8 text-center text-sm text-slate-500 font-medium"
               >
                 {emptyMessage}
               </td>
@@ -72,7 +72,7 @@ export function Table<T extends Record<string, any>>({
                 )}
               >
                 {columns.map((col, colIdx) => (
-                  <td key={colIdx} className={twMerge('px-5 py-3.5', col.className)}>
+                  <td key={colIdx} className={twMerge('px-3 sm:px-5 py-3 sm:py-3.5', col.className)}>
                     {col.cell
                       ? col.cell(item)
                       : col.accessorKey

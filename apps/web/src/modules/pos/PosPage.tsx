@@ -167,6 +167,9 @@ export const PosPage: React.FC = () => {
   const [holdNotes, setHoldNotes] = useState('');
   const [isHoldInputModalOpen, setIsHoldInputModalOpen] = useState(false);
 
+  // Mobile POS view state ('catalog' | 'cart') for <1024px screens
+  const [mobilePosView, setMobilePosView] = useState<'catalog' | 'cart'>('catalog');
+
   const fetchHeldOrders = useCallback(async () => {
     try {
       const orders = await apiRequest<any[]>('/finance/held-orders');
@@ -573,28 +576,28 @@ export const PosPage: React.FC = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-6.5rem)] flex flex-col gap-4 max-w-[1700px] mx-auto overflow-hidden">
+    <div className="h-full lg:h-[calc(100vh-6.5rem)] flex flex-col gap-3 sm:gap-4 max-w-[1700px] mx-auto overflow-hidden">
       {/* Top Header Bar with Mode Switchers */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl bg-white border border-slate-200 shadow-card shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 sm:p-3.5 rounded-xl bg-white border border-slate-200 shadow-card shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-600">
+          <div className="w-8 h-8 rounded-lg bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-600 shrink-0">
             {isRestaurant ? <UtensilsCrossed className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
           </div>
-          <div>
-            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 flex-wrap">
               <span>{isRestaurant ? 'Tables & Orders Billing' : 'POS Register'}</span>
               <Badge variant="brand" size="sm">
                 {activeOutletName}
               </Badge>
             </h2>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-500 truncate">
               Cashier: <strong className="text-slate-800">{user?.firstName} {user?.lastName}</strong> • Max Discount: <strong className="text-brand-600">{authorityLimits.maxDiscountPercent}%</strong>
             </p>
           </div>
         </div>
 
         {/* Shift and Held Orders Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           <Button
             size="sm"
             variant="outline"
@@ -602,7 +605,7 @@ export const PosPage: React.FC = () => {
             className="text-xs font-bold text-orange-600 border-orange-200 hover:bg-orange-50"
             leftIcon={<PauseCircle className="w-4 h-4 text-orange-500" />}
           >
-            Held Orders ({heldOrdersList.length})
+            Held ({heldOrdersList.length})
           </Button>
 
           {currentShift ? (
@@ -620,51 +623,79 @@ export const PosPage: React.FC = () => {
               Start Shift
             </Button>
           )}
-        </div>
 
-        {/* View Switcher if restaurant business */}
-        {isRestaurant && (
-          <div className="flex items-center gap-1.5 p-1 rounded-lg bg-slate-100 border border-slate-200">
-            <button
-              onClick={() => setActiveTab('TABLES')}
-              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeTab === 'TABLES'
-                  ? 'bg-white text-brand-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <UtensilsCrossed className="w-3.5 h-3.5 text-brand-600" />
-              <span>Tables & Floor</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('POS')}
-              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeTab === 'POS'
-                  ? 'bg-white text-brand-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ShoppingCart className="w-3.5 h-3.5 text-orange-500" />
-              <span>Direct / Fast POS</span>
-            </button>
-          </div>
-        )}
+          {/* View Switcher if restaurant business */}
+          {isRestaurant && (
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 border border-slate-200">
+              <button
+                onClick={() => setActiveTab('TABLES')}
+                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
+                  activeTab === 'TABLES'
+                    ? 'bg-white text-brand-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <UtensilsCrossed className="w-3.5 h-3.5 text-brand-600" />
+                <span className="hidden xs:inline sm:inline">Tables</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('POS')}
+                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
+                  activeTab === 'POS'
+                    ? 'bg-white text-brand-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShoppingCart className="w-3.5 h-3.5 text-orange-500" />
+                <span className="hidden xs:inline sm:inline">Direct POS</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile Screen Switcher Tab (< lg) */}
+      <div className="lg:hidden flex items-center p-1 bg-slate-200/80 rounded-xl shrink-0">
+        <button
+          type="button"
+          onClick={() => setMobilePosView('catalog')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            mobilePosView === 'catalog'
+              ? 'bg-white text-brand-700 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          {isRestaurant && activeTab === 'TABLES' ? <UtensilsCrossed className="w-3.5 h-3.5" /> : <PackageOpen className="w-3.5 h-3.5" />}
+          <span>{isRestaurant && activeTab === 'TABLES' ? 'Floor & Menu' : 'Product Catalog'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobilePosView('cart')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+            mobilePosView === 'cart'
+              ? 'bg-white text-brand-700 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Receipt className="w-3.5 h-3.5" />
+          <span>Cart ({currentCart.length}) • ₹{total.toFixed(2)}</span>
+        </button>
       </div>
 
       {/* Main Layout Grid */}
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
         {/* Left Column: Tables Grid OR Menu Catalog */}
-        <div className="flex-1 flex flex-col gap-4 min-w-0 min-h-0 overflow-hidden">
+        <div className={`flex-1 flex-col gap-4 min-w-0 min-h-0 overflow-hidden ${mobilePosView === 'catalog' ? 'flex' : 'hidden lg:flex'}`}>
           {/* If in TABLES mode, show table filter bar and floor plan */}
           {activeTab === 'TABLES' && (
             <div className="space-y-3 shrink-0">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
                   {(['DINE_IN', 'TAKEAWAY', 'DELIVERY'] as OrderType[]).map((type) => (
                     <button
                       key={type}
                       onClick={() => setSelectedOrderType(type)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border whitespace-nowrap ${
                         selectedOrderType === type
                           ? 'bg-brand-50 border-brand-500 text-brand-700 shadow-xs'
                           : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
@@ -815,11 +846,31 @@ export const PosPage: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Mobile Bottom Floating Checkout Button */}
+            {mobilePosView === 'catalog' && currentCart.length > 0 && (
+              <div className="lg:hidden shrink-0 pt-2.5 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setMobilePosView('cart')}
+                  className="w-full py-2.5 px-4 rounded-xl bg-brand-600 text-white font-bold text-xs flex items-center justify-between shadow-lg shadow-brand-500/25"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <ShoppingCart className="w-4 h-4" />
+                    <span>{currentCart.length} item(s) in Cart</span>
+                  </span>
+                  <span className="flex items-center gap-1 font-mono">
+                    <span>₹{total.toFixed(2)} • Checkout</span>
+                    <span>&rarr;</span>
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Right Column: Active Order / Bill & Payment Pad */}
-        <div className="w-full lg:w-96 bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 overflow-hidden shadow-card min-h-0">
+        <div className={`w-full lg:w-96 bg-white rounded-xl border border-slate-200 flex-col shrink-0 overflow-hidden shadow-card min-h-0 ${mobilePosView === 'cart' ? 'flex' : 'hidden lg:flex'}`}>
           {/* Order Header */}
           <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
             <div className="flex items-center gap-2">
@@ -835,9 +886,18 @@ export const PosPage: React.FC = () => {
                 )}
               </div>
             </div>
-            <span className="text-xs text-slate-500 font-mono">
-              {currentCart.length} item(s)
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-mono">
+                {currentCart.length} item(s)
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobilePosView('catalog')}
+                className="lg:hidden px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[11px] font-semibold"
+              >
+                + Add More
+              </button>
+            </div>
           </div>
 
           {/* Order Items List */}

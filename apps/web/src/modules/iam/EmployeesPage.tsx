@@ -283,7 +283,7 @@ export const EmployeesPage: React.FC = () => {
       {/* Employees Table */}
       <Card variant="glass" className="overflow-hidden p-0 border-slate-200">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700">
+          <table className="w-full text-left text-xs text-slate-700 min-w-[700px]">
             <thead className="bg-slate-50/90 text-slate-500 border-b border-slate-200 text-[11px] uppercase tracking-wider font-bold">
               <tr>
                 <th className="py-3 px-4">Employee</th>
@@ -418,7 +418,7 @@ export const EmployeesPage: React.FC = () => {
         )}
 
         <form onSubmit={handleAddEmployee} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
               label="First Name"
               placeholder="e.g. Anand"

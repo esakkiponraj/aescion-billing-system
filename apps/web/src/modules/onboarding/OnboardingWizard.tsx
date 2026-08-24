@@ -208,7 +208,7 @@ export const OnboardingWizard: React.FC = () => {
       </div>
 
       {/* Main Wizard Card */}
-      <Card variant="glass" className="w-full max-w-xl border-slate-200 shadow-2xl p-6 sm:p-8 z-10">
+      <Card variant="glass" className="w-full max-w-xl border-slate-200 shadow-2xl p-4 sm:p-8 z-10">
         {error && (
           <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-xs font-medium">
             {error}
@@ -245,7 +245,7 @@ export const OnboardingWizard: React.FC = () => {
               ]}
             />
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Select
                 label="Country"
                 value={country}
@@ -315,7 +315,7 @@ export const OnboardingWizard: React.FC = () => {
               <p className="text-xs text-slate-500">How many locations are you launching today?</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div
                 onClick={() => setOutletCount(1)}
                 className={`p-4 rounded-xl border transition-all cursor-pointer text-center ${

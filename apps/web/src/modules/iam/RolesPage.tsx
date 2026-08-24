@@ -377,9 +377,9 @@ export const RolesPage: React.FC = () => {
       )}
 
       {/* Roles Master Table */}
-      <Card variant="glass" className="overflow-hidden p-0 border-slate-200">
+      <Card variant="glass" className="overflow-hidden p-0 border-slate-200 shadow-2xs">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700">
+          <table className="w-full text-left text-xs text-slate-700 min-w-[700px]">
             <thead className="bg-slate-50/90 text-slate-500 border-b border-slate-200 text-[11px] uppercase tracking-wider font-bold">
               <tr>
                 <th className="py-3 px-4">Role Name & Code</th>

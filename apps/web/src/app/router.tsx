@@ -11,6 +11,14 @@ import { RolesPage } from '../modules/iam/RolesPage';
 import { OrganizationSettingsPage } from '../modules/settings/OrganizationSettingsPage';
 import { SuperAdminDashboard } from '../modules/super-admin/SuperAdminDashboard';
 import { ProductsPage } from '../modules/products/ProductsPage';
+import { QuotationsListPage } from '../modules/quotations/QuotationsListPage';
+import { QuotationFormPage } from '../modules/quotations/QuotationFormPage';
+import { QuotationDetailPage } from '../modules/quotations/QuotationDetailPage';
+import { InvoicesListPage } from '../modules/invoices/InvoicesListPage';
+import { InvoiceFormPage } from '../modules/invoices/InvoiceFormPage';
+import { InvoiceDetailPage } from '../modules/invoices/InvoiceDetailPage';
+import { ReceiptsListPage } from '../modules/receipts/ReceiptsListPage';
+import { ReceiptDetailPage } from '../modules/receipts/ReceiptDetailPage';
 import { useAuthStore } from '../stores/authStore';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -59,6 +67,45 @@ export const router = createBrowserRouter([
       {
         path: 'products',
         element: <ProductsPage />,
+      },
+      // Quotation Routes
+      {
+        path: 'quotations',
+        element: <QuotationsListPage />,
+      },
+      {
+        path: 'quotations/new',
+        element: <QuotationFormPage />,
+      },
+      {
+        path: 'quotations/:id',
+        element: <QuotationDetailPage />,
+      },
+      {
+        path: 'quotations/:id/edit',
+        element: <QuotationFormPage />,
+      },
+      // Invoice Routes
+      {
+        path: 'invoices',
+        element: <InvoicesListPage />,
+      },
+      {
+        path: 'invoices/new',
+        element: <InvoiceFormPage />,
+      },
+      {
+        path: 'invoices/:id',
+        element: <InvoiceDetailPage />,
+      },
+      // Receipt Routes
+      {
+        path: 'receipts',
+        element: <ReceiptsListPage />,
+      },
+      {
+        path: 'receipts/:id',
+        element: <ReceiptDetailPage />,
       },
       {
         path: 'team',

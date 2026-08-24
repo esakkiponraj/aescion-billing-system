@@ -17,6 +17,7 @@ model User {
   avatarUrl          String?
   isSuperAdmin       Boolean                  @default(false)
   isActive           Boolean                  @default(true)
+  lastSeenAt         DateTime?
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
   decidedApprovals   ApprovalRequest[]        @relation("DecidedBy")
@@ -26,6 +27,10 @@ model User {
   sessions           UserSession[]
   productAccess      ProductCashierAccess[]
   heldOrders         HeldOrder[]
+  createdQuotations  Quotation[]              @relation("QuotationCreatedBy")
+  createdInvoices    SaleInvoice[]            @relation("InvoiceCreatedBy")
+  createdReceipts    Receipt[]                @relation("ReceiptCreatedBy")
+  voidedReceipts     Receipt[]                @relation("ReceiptVoidedBy")
 
   @@map("users")
 }
@@ -76,6 +81,9 @@ model Organization {
   suppliers        Supplier[]
   supportIssues    SupportIssue[]
   heldOrders       HeldOrder[]
+  quotations       Quotation[]
+  receipts         Receipt[]
+  documentCounters DocumentCounter[]
 
   @@map("organizations")
 }
@@ -121,6 +129,8 @@ model Outlet {
   saleInvoices      SaleInvoice[]
   productAccess     ProductOutletAccess[]
   heldOrders        HeldOrder[]
+  quotations        Quotation[]
+  receipts          Receipt[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -402,11 +412,14 @@ model Customer {
   billingAddress     String?
   creditLimit        Float         @default(0.0)
   outstandingBalance Float         @default(0.0)
+  loyaltyPointsBalance Float       @default(0.0)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   payments           Payment[]
   saleInvoices       SaleInvoice[]
+  quotations         Quotation[]
+  receipts           Receipt[]
 
   @@index([organizationId])
   @@map("customers")
@@ -445,11 +458,16 @@ model Product {
   taxRate           Float              @default(0.0)
   hsnCode           String?
   stockQty          Float              @default(0.0)
+  unit              String             @default("UNIT")
+  minOrderQty       Float              @default(1.0)
+  isService         Boolean            @default(false)
+  loyaltyPoints     Float              @default(0.0)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   purchaseBillItems PurchaseBillItem[]
   saleInvoiceItems  SaleInvoiceItem[]
+  quotationItems    QuotationItem[]
   outletAccess      ProductOutletAccess[]
   cashierAccess     ProductCashierAccess[]
 
@@ -475,18 +493,30 @@ model SaleInvoice {
   paidAmount        Float             @default(0.0)
   outstandingAmount Float             @default(0.0)
   paymentStatus     String            @default("PAID")
+  orderType         String            @default("RETAIL")
+  loyaltyPointsEarned Float           @default(0.0)
+  loyaltyPointsRedeemed Float         @default(0.0)
   isPosSale         Boolean           @default(true)
   dueDate           DateTime?
+  quotationId       String?
+  additionalCharges Float             @default(0.0)
+  cancelReason      String?
+  termsAndConditions String?
+  notes             String?
   createdByUserId   String?
   registerSessionId String?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   payments          Payment[]
+  receipts          Receipt[]
   items             SaleInvoiceItem[]
   customer          Customer?         @relation(fields: [customerId], references: [id])
   organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   outlet            Outlet            @relation(fields: [outletId], references: [id], onDelete: Cascade)
   registerSession   RegisterSession?  @relation(fields: [registerSessionId], references: [id])
+  createdByUser     User?             @relation("InvoiceCreatedBy", fields: [createdByUserId], references: [id])
+  quotation         Quotation?        @relation("InvoiceQuotation", fields: [quotationId], references: [id])
+  quotationsConverted Quotation[]     @relation("ConvertedInvoice")
 
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, outletId])
@@ -600,6 +630,7 @@ model Payment {
   purchaseBill      PurchaseBill?    @relation(fields: [purchaseBillId], references: [id])
   supplier          Supplier?        @relation(fields: [supplierId], references: [id])
   registerSession   RegisterSession? @relation(fields: [registerSessionId], references: [id])
+  receipts          Receipt[]
 
   @@unique([organizationId, paymentNumber])
   @@index([organizationId, outletId])
@@ -724,5 +755,124 @@ model HeldOrder {
   @@index([registerSessionId])
   @@map("held_orders")
 }
+
+model Quotation {
+  id                 String          @id @default(uuid())
+  quotationNumber    String
+  organizationId     String
+  outletId           String
+  customerId         String?
+  quotationDate      DateTime        @default(now())
+  validUntil         DateTime?
+  subtotal           Float           @default(0.0)
+  discountPercent    Float           @default(0.0)
+  discountAmount     Float           @default(0.0)
+  taxableAmount      Float           @default(0.0)
+  cgstAmount         Float           @default(0.0)
+  sgstAmount         Float           @default(0.0)
+  igstAmount         Float           @default(0.0)
+  additionalCharges  Float           @default(0.0)
+  totalAmount        Float           @default(0.0)
+  status             String          @default("DRAFT")
+  termsAndConditions String?
+  notes              String?
+  cancelReason       String?
+  convertedInvoiceId String?
+  createdByUserId    String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  customer           Customer?       @relation(fields: [customerId], references: [id])
+  organization       Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet             Outlet          @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  createdByUser      User?           @relation("QuotationCreatedBy", fields: [createdByUserId], references: [id])
+  convertedInvoice   SaleInvoice?    @relation("ConvertedInvoice", fields: [convertedInvoiceId], references: [id])
+  invoicesGenerated  SaleInvoice[]   @relation("InvoiceQuotation")
+  items              QuotationItem[]
+
+  @@unique([organizationId, quotationNumber])
+  @@index([organizationId, outletId])
+  @@index([organizationId, createdAt])
+  @@index([status])
+  @@index([createdByUserId])
+  @@map("quotations")
+}
+
+model QuotationItem {
+  id             String    @id @default(uuid())
+  quotationId    String
+  productId      String?
+  description    String
+  quantity       Float     @default(1.0)
+  unitCost       Float     @default(0.0)
+  unitPrice      Float
+  discountAmount Float     @default(0.0)
+  taxRate        Float     @default(0.0)
+  taxableAmount  Float
+  cgst           Float     @default(0.0)
+  sgst           Float     @default(0.0)
+  igst           Float     @default(0.0)
+  totalAmount    Float
+  productName    String?
+  sku            String?
+  quotation      Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product        Product?  @relation(fields: [productId], references: [id])
+
+  @@index([quotationId])
+  @@map("quotation_items")
+}
+
+model Receipt {
+  id               String       @id @default(uuid())
+  receiptNumber    String
+  organizationId   String
+  outletId         String
+  invoiceId        String
+  paymentId        String?
+  customerId       String?
+  amountPaid       Float
+  previouslyPaid   Float        @default(0.0)
+  totalPaid        Float        @default(0.0)
+  remainingBalance Float        @default(0.0)
+  paymentMethod    String       @default("CASH")
+  referenceNumber  String?
+  paymentDate      DateTime     @default(now())
+  status           String       @default("ISSUED")
+  notes            String?
+  voidReason       String?
+  voidedAt         DateTime?
+  voidedByUserId   String?
+  createdByUserId  String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outlet           Outlet       @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  invoice          SaleInvoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  payment          Payment?     @relation(fields: [paymentId], references: [id])
+  customer         Customer?    @relation(fields: [customerId], references: [id])
+  createdByUser    User?        @relation("ReceiptCreatedBy", fields: [createdByUserId], references: [id])
+  voidedByUser     User?        @relation("ReceiptVoidedBy", fields: [voidedByUserId], references: [id])
+
+  @@unique([organizationId, receiptNumber])
+  @@index([organizationId, outletId])
+  @@index([organizationId, paymentDate])
+  @@index([invoiceId])
+  @@index([status])
+  @@index([createdByUserId])
+  @@map("receipts")
+}
+
+model DocumentCounter {
+  id             String       @id @default(uuid())
+  organizationId String
+  type           String
+  year           Int
+  currentCount   Int          @default(0)
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, type, year])
+  @@map("document_counters")
+}
+
 
 

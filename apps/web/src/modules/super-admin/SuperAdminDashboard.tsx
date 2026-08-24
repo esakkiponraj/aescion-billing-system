@@ -376,7 +376,7 @@ export const SuperAdminDashboard: React.FC = () => {
         <div className="space-y-6">
           {/* Top Platform KPI Cards */}
           {statsData && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card variant="glass" className="space-y-1 p-5">
                 <span className="text-xs font-semibold text-slate-500 uppercase">
                   Total Businesses
