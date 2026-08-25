@@ -9,21 +9,34 @@ export interface CashierPresencePayload {
   lastSeenAt: string;
 }
 
+export const PRESENCE_CONSTANTS = {
+  HEARTBEAT_INTERVAL_MS: 20_000, // 20s frontend heartbeat
+  HEARTBEAT_TIMEOUT_MS: 90_000, // 90s backend heartbeat timeout
+  SWEEP_INTERVAL_MS: 15_000, // 15s backend stale check interval
+  DISCONNECT_GRACE_MS: 10_000, // 10s reconnection grace period on socket drop
+  DB_PERSIST_THROTTLE_MS: 60_000, // 60s DB write throttle for lastSeenAt
+};
+
+export interface UserPresenceRecord {
+  userId: string;
+  orgIds: string[];
+  isCashier: boolean;
+  sockets: Set<string>;
+  lastHeartbeat: number;
+  lastDbPersist: number;
+  status: 'ACTIVE' | 'INACTIVE';
+  disconnectGraceTimer: NodeJS.Timeout | null;
+}
+
 @Injectable()
 export class PresenceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PresenceService.name);
 
-  // userId -> Set<socketId>
-  private userConnections = new Map<string, Set<string>>();
+  // userId -> UserPresenceRecord
+  private presenceRecords = new Map<string, UserPresenceRecord>();
 
-  // socketId -> metadata
-  private socketToUser = new Map<
-    string,
-    { userId: string; orgIds: string[]; isCashier: boolean }
-  >();
-
-  // userId -> last heartbeat timestamp in ms
-  private userLastHeartbeat = new Map<string, number>();
+  // socketId -> userId
+  private socketToUserId = new Map<string, string>();
 
   private sweepInterval: NodeJS.Timeout | null = null;
 
@@ -34,16 +47,30 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    // Sweep every 10 seconds to check for heartbeats older than 45 seconds
+    if (this.sweepInterval) {
+      clearInterval(this.sweepInterval);
+    }
+    // Sweep every 15 seconds to check for heartbeats older than 90 seconds
     this.sweepInterval = setInterval(() => {
       this.sweepStaleConnections();
-    }, 10000);
+    }, PRESENCE_CONSTANTS.SWEEP_INTERVAL_MS);
   }
 
   onModuleDestroy() {
     if (this.sweepInterval) {
       clearInterval(this.sweepInterval);
+      this.sweepInterval = null;
     }
+
+    // Clean up all pending disconnect grace timers
+    for (const record of this.presenceRecords.values()) {
+      if (record.disconnectGraceTimer) {
+        clearTimeout(record.disconnectGraceTimer);
+        record.disconnectGraceTimer = null;
+      }
+    }
+    this.presenceRecords.clear();
+    this.socketToUserId.clear();
   }
 
   /**
@@ -55,45 +82,125 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
     orgIds: string[],
     isCashier: boolean,
   ): { isFirstConnection: boolean } {
-    let sockets = this.userConnections.get(userId);
-    const isFirstConnection = !sockets || sockets.size === 0;
+    this.socketToUserId.set(socketId, userId);
 
-    if (!sockets) {
-      sockets = new Set<string>();
-      this.userConnections.set(userId, sockets);
+    let record = this.presenceRecords.get(userId);
+    const wasInactive = !record || record.status === 'INACTIVE';
+
+    if (record) {
+      // Cancel pending disconnect grace period if reconnecting
+      if (record.disconnectGraceTimer) {
+        clearTimeout(record.disconnectGraceTimer);
+        record.disconnectGraceTimer = null;
+      }
+
+      record.sockets.add(socketId);
+      record.lastHeartbeat = Date.now();
+      record.orgIds = Array.from(new Set([...record.orgIds, ...orgIds]));
+      if (isCashier) record.isCashier = true;
+
+      if (record.status === 'INACTIVE') {
+        record.status = 'ACTIVE';
+        if (record.isCashier && record.orgIds.length > 0) {
+          const nowIso = new Date().toISOString();
+          for (const orgId of record.orgIds) {
+            this.presenceGateway.broadcastCashierPresence(orgId, {
+              cashierId: userId,
+              isOnline: true,
+              status: 'ACTIVE',
+              lastSeenAt: nowIso,
+            });
+          }
+        }
+        this.persistLastSeenAt(userId);
+      }
+    } else {
+      record = {
+        userId,
+        orgIds,
+        isCashier,
+        sockets: new Set([socketId]),
+        lastHeartbeat: Date.now(),
+        lastDbPersist: Date.now(),
+        status: 'ACTIVE',
+        disconnectGraceTimer: null,
+      };
+      this.presenceRecords.set(userId, record);
+
+      if (isCashier && orgIds.length > 0) {
+        const nowIso = new Date().toISOString();
+        for (const orgId of orgIds) {
+          this.presenceGateway.broadcastCashierPresence(orgId, {
+            cashierId: userId,
+            isOnline: true,
+            status: 'ACTIVE',
+            lastSeenAt: nowIso,
+          });
+        }
+      }
+      this.persistLastSeenAt(userId);
     }
 
-    sockets.add(socketId);
-    this.socketToUser.set(socketId, { userId, orgIds, isCashier });
-    this.userLastHeartbeat.set(userId, Date.now());
-
     this.logger.log(
-      `[Presence] User ${userId} connected (socket: ${socketId}, total tabs: ${sockets.size}, isCashier: ${isCashier})`,
+      `[Presence] User ${userId} connected (socket: ${socketId}, total tabs: ${record.sockets.size}, isCashier: ${isCashier})`,
     );
 
-    return { isFirstConnection };
+    return { isFirstConnection: wasInactive };
   }
 
   /**
-   * Handle incoming heartbeat from cashier client.
+   * Handle incoming heartbeat from cashier or authenticated client.
    */
   recordHeartbeat(userId: string) {
-    this.userLastHeartbeat.set(userId, Date.now());
-    const now = new Date();
+    let record = this.presenceRecords.get(userId);
 
-    // Asynchronously update lastSeenAt in DB without blocking
-    this.prisma.user
-      .update({
-        where: { id: userId },
-        data: { lastSeenAt: now } as any,
-      })
-      .catch((err) => {
-        this.logger.warn(`Failed to update lastSeenAt for user ${userId}: ${err.message}`);
-      });
+    if (!record) {
+      record = {
+        userId,
+        orgIds: [],
+        isCashier: false,
+        sockets: new Set(),
+        lastHeartbeat: Date.now(),
+        lastDbPersist: Date.now(),
+        status: 'ACTIVE',
+        disconnectGraceTimer: null,
+      };
+      this.presenceRecords.set(userId, record);
+    } else {
+      record.lastHeartbeat = Date.now();
+
+      if (record.disconnectGraceTimer) {
+        clearTimeout(record.disconnectGraceTimer);
+        record.disconnectGraceTimer = null;
+      }
+
+      if (record.status === 'INACTIVE') {
+        record.status = 'ACTIVE';
+        if (record.isCashier && record.orgIds.length > 0) {
+          const nowIso = new Date().toISOString();
+          for (const orgId of record.orgIds) {
+            this.presenceGateway.broadcastCashierPresence(orgId, {
+              cashierId: userId,
+              isOnline: true,
+              status: 'ACTIVE',
+              lastSeenAt: nowIso,
+            });
+          }
+        }
+      }
+    }
+
+    // Throttled database update (at most once every 60s)
+    const now = Date.now();
+    if (now - record.lastDbPersist >= PRESENCE_CONSTANTS.DB_PERSIST_THROTTLE_MS) {
+      record.lastDbPersist = now;
+      this.persistLastSeenAt(userId);
+    }
   }
 
   /**
    * Remove a socket connection when a tab or socket disconnects.
+   * Uses a grace period before marking INACTIVE to support page refreshes/reconnections.
    */
   removeConnection(socketId: string): {
     userId: string;
@@ -101,40 +208,39 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
     isCashier: boolean;
     isLastConnection: boolean;
   } | null {
-    const meta = this.socketToUser.get(socketId);
-    if (!meta) return null;
+    const userId = this.socketToUserId.get(socketId);
+    if (!userId) return null;
 
-    this.socketToUser.delete(socketId);
-    const sockets = this.userConnections.get(meta.userId);
+    this.socketToUserId.delete(socketId);
+    const record = this.presenceRecords.get(userId);
+    if (!record) return null;
 
-    let isLastConnection = false;
-    if (sockets) {
-      sockets.delete(socketId);
-      if (sockets.size === 0) {
-        this.userConnections.delete(meta.userId);
-        this.userLastHeartbeat.delete(meta.userId);
-        isLastConnection = true;
-
-        const now = new Date();
-        this.prisma.user
-          .update({
-            where: { id: meta.userId },
-            data: { lastSeenAt: now } as any,
-          })
-          .catch(() => {});
-      }
-    } else {
-      isLastConnection = true;
-    }
+    record.sockets.delete(socketId);
 
     this.logger.log(
-      `[Presence] Socket ${socketId} disconnected for user ${meta.userId} (isLastConnection: ${isLastConnection})`,
+      `[Presence] Socket ${socketId} disconnected for user ${userId} (remaining tabs: ${record.sockets.size})`,
     );
 
+    const isLastConnection = record.sockets.size === 0;
+
+    if (isLastConnection) {
+      // Start reconnection grace period (10s) before marking INACTIVE
+      if (record.disconnectGraceTimer) {
+        clearTimeout(record.disconnectGraceTimer);
+      }
+
+      record.disconnectGraceTimer = setTimeout(() => {
+        record.disconnectGraceTimer = null;
+        if (record.sockets.size === 0 && record.status === 'ACTIVE') {
+          this.transitionToInactive(record, 'grace_period_expired');
+        }
+      }, PRESENCE_CONSTANTS.DISCONNECT_GRACE_MS);
+    }
+
     return {
-      userId: meta.userId,
-      orgIds: meta.orgIds,
-      isCashier: meta.isCashier,
+      userId: record.userId,
+      orgIds: record.orgIds,
+      isCashier: record.isCashier,
       isLastConnection,
     };
   }
@@ -142,27 +248,33 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   /**
    * Manual logout: instantly marks user offline across all sessions.
    */
-  manualLogout(userId: string, orgIds: string[]) {
-    this.userConnections.delete(userId);
-    this.userLastHeartbeat.delete(userId);
+  manualLogout(userId: string, orgIds?: string[]) {
+    const record = this.presenceRecords.get(userId);
+    if (record) {
+      if (record.disconnectGraceTimer) {
+        clearTimeout(record.disconnectGraceTimer);
+        record.disconnectGraceTimer = null;
+      }
 
-    const now = new Date();
-    this.prisma.user
-      .update({
-        where: { id: userId },
-        data: { lastSeenAt: now } as any,
-      })
-      .catch(() => {});
+      for (const sId of record.sockets) {
+        this.socketToUserId.delete(sId);
+      }
+      record.sockets.clear();
+
+      if (record.status === 'ACTIVE') {
+        this.transitionToInactive(record, 'manual_logout');
+      }
+
+      this.presenceRecords.delete(userId);
+    } else {
+      this.persistLastSeenAt(userId);
+    }
 
     this.logger.log(`[Presence] Manual logout executed for user ${userId}`);
   }
 
   /**
    * Check if a cashier is currently live and active.
-   * True only if:
-   * 1. Account is active (enabled)
-   * 2. Active socket connection exists
-   * 3. Heartbeat received in the last 45 seconds
    */
   isCashierOnline(
     userId: string,
@@ -170,60 +282,79 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   ): boolean {
     if (user.isActive === false) return false;
 
-    const sockets = this.userConnections.get(userId);
-    const hasSockets = sockets && sockets.size > 0;
-    if (!hasSockets) return false;
+    const record = this.presenceRecords.get(userId);
+    if (!record) return false;
+    if (record.status !== 'ACTIVE') return false;
+    if (record.sockets.size === 0 && !record.disconnectGraceTimer) return false;
 
-    const lastHeartbeat = this.userLastHeartbeat.get(userId);
-    if (!lastHeartbeat) return false;
-
-    const elapsed = Date.now() - lastHeartbeat;
-    return elapsed <= 60000;
+    const elapsed = Date.now() - record.lastHeartbeat;
+    return elapsed <= PRESENCE_CONSTANTS.HEARTBEAT_TIMEOUT_MS;
   }
 
   /**
-   * Periodic sweep to detect missed heartbeats (> 60s).
+   * Transition presence record to INACTIVE (single transition with single DB update & broadcast).
+   */
+  private transitionToInactive(record: UserPresenceRecord, reason: string) {
+    if (record.status === 'INACTIVE') return;
+
+    record.status = 'INACTIVE';
+    this.persistLastSeenAt(record.userId);
+
+    this.logger.log(
+      `[Presence] User ${record.userId} (cashier: ${record.isCashier}) transitioned to INACTIVE (reason: ${reason})`,
+    );
+
+    if (record.isCashier && record.orgIds.length > 0) {
+      const nowIso = new Date().toISOString();
+      for (const orgId of record.orgIds) {
+        this.presenceGateway.broadcastCashierPresence(orgId, {
+          cashierId: record.userId,
+          isOnline: false,
+          status: 'INACTIVE',
+          lastSeenAt: nowIso,
+        });
+      }
+    }
+  }
+
+  /**
+   * Periodic sweep to detect missed heartbeats (> 90s).
    */
   private sweepStaleConnections() {
     const now = Date.now();
-    const TIMEOUT_MS = 60000;
 
-    for (const [userId, lastHb] of this.userLastHeartbeat.entries()) {
-      if (now - lastHb > TIMEOUT_MS) {
-        // Find metadata for orgs
-        const sockets = this.userConnections.get(userId);
-        let orgIds: string[] = [];
-        let isCashier = false;
+    for (const record of this.presenceRecords.values()) {
+      // If already INACTIVE, skip immediately to prevent repeated logs/work
+      if (record.status !== 'ACTIVE') continue;
 
-        if (sockets) {
-          for (const sId of sockets) {
-            const m = this.socketToUser.get(sId);
-            if (m) {
-              orgIds = m.orgIds;
-              if (m.isCashier) isCashier = true;
-            }
-            this.socketToUser.delete(sId);
-          }
+      if (now - record.lastHeartbeat > PRESENCE_CONSTANTS.HEARTBEAT_TIMEOUT_MS) {
+        if (record.disconnectGraceTimer) {
+          clearTimeout(record.disconnectGraceTimer);
+          record.disconnectGraceTimer = null;
         }
 
-        if (isCashier) {
-          this.logger.warn(`[Presence] Cashier ${userId} heartbeat timed out (> 60s). Transitioning to INACTIVE.`);
+        for (const sId of record.sockets) {
+          this.socketToUserId.delete(sId);
         }
+        record.sockets.clear();
 
-        this.userConnections.delete(userId);
-        this.userLastHeartbeat.delete(userId);
-
-        if (isCashier && orgIds.length > 0) {
-          for (const orgId of orgIds) {
-            this.presenceGateway.broadcastCashierPresence(orgId, {
-              cashierId: userId,
-              isOnline: false,
-              status: 'INACTIVE',
-              lastSeenAt: new Date().toISOString(),
-            });
-          }
-        }
+        this.transitionToInactive(record, 'heartbeat_timeout');
       }
     }
+  }
+
+  /**
+   * Persist lastSeenAt timestamp in PostgreSQL safely.
+   */
+  private persistLastSeenAt(userId: string) {
+    const now = new Date();
+    this.prisma.user
+      .update({
+        where: { id: userId },
+        data: { lastSeenAt: now } as any,
+      })
+      .catch((err) => {
+        this.logger.debug(`Failed to update lastSeenAt for user ${userId}: ${err.message}`);
+      });
   }
 }

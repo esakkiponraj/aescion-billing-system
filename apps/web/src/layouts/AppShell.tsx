@@ -68,23 +68,37 @@ export const AppShell: React.FC = () => {
   const isCashier = roles.includes('CASHIER');
   const isAccountant = roles.includes('ACCOUNTANT');
 
-  // Real-time WebSocket connection & Heartbeat for active session
+  // Real-time WebSocket connection & 20s Heartbeat for active session
   useEffect(() => {
     if (!user) {
       disconnectSocket();
       return;
     }
 
-    getSocket();
+    const socket = getSocket();
 
-    // Send heartbeat immediately, then every 15 seconds to keep presence alive and update lastSeenAt
+    // Send heartbeat immediately on mount
     sendCashierHeartbeat();
+
+    // Re-send heartbeat whenever socket connects or reconnects
+    const handleConnect = () => {
+      sendCashierHeartbeat();
+    };
+
+    if (socket) {
+      socket.on('connect', handleConnect);
+    }
+
+    // Set 20-second heartbeat interval (backend timeout is 90s)
     const heartbeatTimer = setInterval(() => {
       sendCashierHeartbeat();
-    }, 15000);
+    }, 20000);
 
     return () => {
       clearInterval(heartbeatTimer);
+      if (socket) {
+        socket.off('connect', handleConnect);
+      }
     };
   }, [user]);
 

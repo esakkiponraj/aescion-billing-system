@@ -123,48 +123,21 @@ export class PresenceGateway
       client.join(`org_${orgId}`);
     }
 
-    // Register connection in PresenceService
-    const { isFirstConnection } = this.presenceService.addConnection(
+    // Register connection in PresenceService (handles single ACTIVE transition & broadcast)
+    this.presenceService.addConnection(
       userId,
       client.id,
       orgIds,
       Boolean(isCashier),
     );
-
-    // If this cashier was previously offline and this is their first connection, broadcast ONLINE status
-    if (isCashier && isFirstConnection) {
-      const nowIso = new Date().toISOString();
-      for (const orgId of orgIds) {
-        this.broadcastCashierPresence(orgId, {
-          cashierId: userId,
-          isOnline: true,
-          status: 'ACTIVE',
-          lastSeenAt: nowIso,
-        });
-      }
-    }
   }
 
   handleDisconnect(client: Socket) {
-    const result = this.presenceService.removeConnection(client.id);
-    if (!result) return;
-
-    // If this was the last connection for a cashier, broadcast OFFLINE status
-    if (result.isCashier && result.isLastConnection) {
-      const nowIso = new Date().toISOString();
-      for (const orgId of result.orgIds) {
-        this.broadcastCashierPresence(orgId, {
-          cashierId: result.userId,
-          isOnline: false,
-          status: 'INACTIVE',
-          lastSeenAt: nowIso,
-        });
-      }
-    }
+    this.presenceService.removeConnection(client.id);
   }
 
-  @SubscribeMessage('cashier:heartbeat')
-  handleHeartbeat(@ConnectedSocket() client: Socket) {
+  @SubscribeMessage('presence:heartbeat')
+  handlePresenceHeartbeat(@ConnectedSocket() client: Socket) {
     const userId = client.data?.userId;
     if (!userId) return { success: false, error: 'Unauthorized' };
 
@@ -172,25 +145,34 @@ export class PresenceGateway
     return { success: true, timestamp: Date.now() };
   }
 
-  @SubscribeMessage('cashier:logout')
-  handleManualLogout(@ConnectedSocket() client: Socket) {
+  @SubscribeMessage('cashier:heartbeat')
+  handleCashierHeartbeat(@ConnectedSocket() client: Socket) {
+    const userId = client.data?.userId;
+    if (!userId) return { success: false, error: 'Unauthorized' };
+
+    this.presenceService.recordHeartbeat(userId);
+    return { success: true, timestamp: Date.now() };
+  }
+
+  @SubscribeMessage('presence:logout')
+  handlePresenceLogout(@ConnectedSocket() client: Socket) {
     const userId = client.data?.userId;
     const orgIds: string[] = client.data?.orgIds || [];
-    const isCashier: boolean = client.data?.isCashier || false;
 
     if (userId) {
-      if (isCashier && orgIds.length > 0) {
-        const nowIso = new Date().toISOString();
-        for (const orgId of orgIds) {
-          this.broadcastCashierPresence(orgId, {
-            cashierId: userId,
-            isOnline: false,
-            status: 'INACTIVE',
-            lastSeenAt: nowIso,
-          });
-        }
-      }
+      this.presenceService.manualLogout(userId, orgIds);
+      client.disconnect(true);
+    }
 
+    return { success: true };
+  }
+
+  @SubscribeMessage('cashier:logout')
+  handleCashierLogout(@ConnectedSocket() client: Socket) {
+    const userId = client.data?.userId;
+    const orgIds: string[] = client.data?.orgIds || [];
+
+    if (userId) {
       this.presenceService.manualLogout(userId, orgIds);
       client.disconnect(true);
     }

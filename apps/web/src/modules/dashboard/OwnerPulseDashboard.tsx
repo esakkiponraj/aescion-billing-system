@@ -32,7 +32,7 @@ import { useTenantStore } from '../../stores/tenantStore';
 import { useAuthStore } from '../../stores/authStore';
 import { apiRequest } from '../../services/api';
 import { getBusinessTypeCapability } from '@aescion/types';
-import { subscribeToCashierPresence } from '../../services/socket';
+import { subscribeToCashierPresence, onSocketConnect } from '../../services/socket';
 
 type DateFilterPreset = 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
 
@@ -103,7 +103,7 @@ export const OwnerPulseDashboard: React.FC = () => {
 
   // Real-time Cashier Live Presence Subscription
   useEffect(() => {
-    const unsubscribe = subscribeToCashierPresence((data) => {
+    const unsubscribePresence = subscribeToCashierPresence((data) => {
       console.log('[Owner Dashboard] Live Cashier Presence update received:', data);
       setSummary((prev: any) => {
         if (!prev) return prev;
@@ -136,8 +136,14 @@ export const OwnerPulseDashboard: React.FC = () => {
       });
     });
 
+    // Re-fetch dashboard data when owner socket reconnects to avoid stale presence state
+    const unsubscribeConnect = onSocketConnect(() => {
+      fetchDashboardData(true);
+    });
+
     return () => {
-      unsubscribe();
+      unsubscribePresence();
+      unsubscribeConnect();
     };
   }, [fetchDashboardData]);
 

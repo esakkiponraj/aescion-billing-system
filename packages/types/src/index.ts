@@ -665,3 +665,11 @@ export function getBusinessTypeCapability(
   return BUSINESS_TYPE_CAPABILITIES[normalized] || BUSINESS_TYPE_CAPABILITIES[BusinessType.RETAIL];
 }
 
+export interface CashierPresenceEvent {
+  cashierId: string;
+  isOnline: boolean;
+  status: 'ACTIVE' | 'INACTIVE';
+  lastSeenAt: string;
+}
+
+

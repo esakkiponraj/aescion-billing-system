@@ -76,10 +76,13 @@ export const disconnectSocket = () => {
   }
 };
 
-export const sendCashierHeartbeat = () => {
+/**
+ * Emit regular heartbeat event to backend presence tracking.
+ */
+export const sendPresenceHeartbeat = () => {
   const socket = getSocket();
   if (socket && socket.connected) {
-    socket.emit('cashier:heartbeat', {}, (response: any) => {
+    socket.emit('presence:heartbeat', {}, (response: any) => {
       if (response?.error) {
         console.warn('[Presence Heartbeat] Error:', response.error);
       }
@@ -87,7 +90,12 @@ export const sendCashierHeartbeat = () => {
   }
 };
 
-export const sendCashierLogout = async (): Promise<void> => {
+export const sendCashierHeartbeat = sendPresenceHeartbeat;
+
+/**
+ * Cleanly notify backend of user logout and disconnect socket.
+ */
+export const sendPresenceLogout = async (): Promise<void> => {
   const socket = socketInstance;
   if (socket && socket.connected) {
     return new Promise<void>((resolve) => {
@@ -96,7 +104,7 @@ export const sendCashierLogout = async (): Promise<void> => {
         resolve();
       }, 500);
 
-      socket.emit('cashier:logout', {}, () => {
+      socket.emit('presence:logout', {}, () => {
         clearTimeout(timer);
         disconnectSocket();
         resolve();
@@ -106,6 +114,11 @@ export const sendCashierLogout = async (): Promise<void> => {
   disconnectSocket();
 };
 
+export const sendCashierLogout = sendPresenceLogout;
+
+/**
+ * Subscribe to real-time cashier presence events broadcast by backend.
+ */
 export const subscribeToCashierPresence = (
   callback: (data: CashierPresenceEvent) => void,
 ): (() => void) => {
@@ -116,5 +129,19 @@ export const subscribeToCashierPresence = (
 
   return () => {
     socket.off('cashier:presence', callback);
+  };
+};
+
+/**
+ * Register a callback when socket reconnects (useful for refreshing stale dashboard data).
+ */
+export const onSocketConnect = (callback: () => void): (() => void) => {
+  const socket = getSocket();
+  if (!socket) return () => {};
+
+  socket.on('connect', callback);
+
+  return () => {
+    socket.off('connect', callback);
   };
 };
