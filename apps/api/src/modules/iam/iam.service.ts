@@ -216,6 +216,9 @@ export class IamService {
         },
         outlet: assignedOutlet ? { id: assignedOutlet.id, name: assignedOutlet.name } : null,
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -367,6 +370,9 @@ export class IamService {
         },
         outlet: assignedOutlet ? { id: assignedOutlet.id, name: assignedOutlet.name } : null,
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -495,6 +501,9 @@ export class IamService {
           },
         },
       });
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -589,6 +598,9 @@ export class IamService {
           },
         },
       });
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -625,6 +637,9 @@ export class IamService {
       await tx.role.delete({
         where: { id: roleId },
       });
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
 
     return {

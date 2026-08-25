@@ -107,7 +107,24 @@ export class FinanceService {
     if (outletId) whereSales.outletId = outletId;
     if (dateFilter.createdAt) whereSales.createdAt = dateFilter.createdAt;
 
-    const [salesInvoices, allOutlets, lowStockProducts, recentInvoices, allOrgInvoices, activeSessions] = await Promise.all([
+    const wherePurchases: any = { organizationId: orgId, paymentStatus: { not: 'CANCELLED' } };
+    if (outletId) wherePurchases.outletId = outletId;
+    if (dateFilter.createdAt) wherePurchases.purchaseDate = dateFilter.createdAt;
+
+    const whereExpenses: any = { organizationId: orgId, status: 'PAID' };
+    if (outletId) whereExpenses.outletId = outletId;
+    if (dateFilter.createdAt) whereExpenses.expenseDate = dateFilter.createdAt;
+
+    const [
+      salesInvoices,
+      allOutlets,
+      lowStockProducts,
+      recentInvoices,
+      allOrgInvoices,
+      activeSessions,
+      purchaseBills,
+      expenses,
+    ] = await Promise.all([
       this.prisma.saleInvoice.findMany({
         where: whereSales,
         include: { items: true, customer: true, outlet: true },
@@ -134,24 +151,14 @@ export class FinanceService {
       this.prisma.registerSession.findMany({
         where: { organizationId: orgId, ...(outletId ? { outletId } : {}), status: 'OPEN' },
       }),
+      this.prisma.purchaseBill.findMany({
+        where: wherePurchases,
+        include: { items: true, supplier: true },
+      }),
+      this.prisma.expense.findMany({
+        where: whereExpenses,
+      }),
     ]);
-
-    const wherePurchases: any = { organizationId: orgId, paymentStatus: { not: 'CANCELLED' } };
-    if (outletId) wherePurchases.outletId = outletId;
-    if (dateFilter.createdAt) wherePurchases.purchaseDate = dateFilter.createdAt;
-
-    const purchaseBills = await this.prisma.purchaseBill.findMany({
-      where: wherePurchases,
-      include: { items: true, supplier: true },
-    });
-
-    const whereExpenses: any = { organizationId: orgId, status: 'PAID' };
-    if (outletId) whereExpenses.outletId = outletId;
-    if (dateFilter.createdAt) whereExpenses.expenseDate = dateFilter.createdAt;
-
-    const expenses = await this.prisma.expense.findMany({
-      where: whereExpenses,
-    });
 
     // 4. Calculations for Selected Period
     const totalSales = salesInvoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
@@ -955,6 +962,9 @@ export class FinanceService {
           receipts: true,
         },
       });
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -1128,6 +1138,9 @@ export class FinanceService {
           paymentStatus: newPaymentStatus,
         },
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -1231,6 +1244,9 @@ export class FinanceService {
       });
 
       return updated;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -1426,6 +1442,9 @@ export class FinanceService {
       });
 
       return p;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
 
     return payment;
@@ -1667,34 +1686,34 @@ export class FinanceService {
     const orgId = tenantContext.organizationId;
     const outletId = this.getOutletFilter(tenantContext, query?.outletId);
 
-    const sessions = await this.prisma.registerSession.findMany({
-      where: { organizationId: orgId, ...(outletId ? { outletId } : {}) },
-      include: { outlet: true },
-      orderBy: { openedAt: 'desc' },
-      take: 10,
-    });
-
-    const digitalPayments = await this.prisma.payment.findMany({
-      where: {
-        organizationId: orgId,
-        ...(outletId ? { outletId } : {}),
-        paymentMethod: { in: ['UPI', 'CARD', 'BANK_TRANSFER'] },
-      },
-      include: { customer: true, supplier: true, outlet: true },
-      orderBy: { transactionDate: 'desc' },
-      take: 20,
-    });
-
-    const cashPayments = await this.prisma.payment.findMany({
-      where: {
-        organizationId: orgId,
-        ...(outletId ? { outletId } : {}),
-        paymentMethod: 'CASH',
-      },
-      include: { customer: true, supplier: true, outlet: true },
-      orderBy: { transactionDate: 'desc' },
-      take: 20,
-    });
+    const [sessions, digitalPayments, cashPayments] = await Promise.all([
+      this.prisma.registerSession.findMany({
+        where: { organizationId: orgId, ...(outletId ? { outletId } : {}) },
+        include: { outlet: true },
+        orderBy: { openedAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          paymentMethod: { in: ['UPI', 'CARD', 'BANK_TRANSFER'] },
+        },
+        include: { customer: true, supplier: true, outlet: true },
+        orderBy: { transactionDate: 'desc' },
+        take: 20,
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          paymentMethod: 'CASH',
+        },
+        include: { customer: true, supplier: true, outlet: true },
+        orderBy: { transactionDate: 'desc' },
+        take: 20,
+      }),
+    ]);
 
     return { sessions, digitalPayments, cashPayments };
   }
@@ -1842,11 +1861,6 @@ export class FinanceService {
       if (query.endDate) whereSales.createdAt.lte = new Date(query.endDate);
     }
 
-    const salesInvoices = await this.prisma.saleInvoice.findMany({
-      where: whereSales,
-      include: { items: true },
-    });
-
     const wherePurchases: any = { organizationId: orgId, paymentStatus: { not: 'CANCELLED' } };
     if (outletId) wherePurchases.outletId = outletId;
     if (query?.startDate || query?.endDate) {
@@ -1855,10 +1869,16 @@ export class FinanceService {
       if (query.endDate) wherePurchases.purchaseDate.lte = new Date(query.endDate);
     }
 
-    const purchaseBills = await this.prisma.purchaseBill.findMany({
-      where: wherePurchases,
-      include: { items: true },
-    });
+    const [salesInvoices, purchaseBills] = await Promise.all([
+      this.prisma.saleInvoice.findMany({
+        where: whereSales,
+        include: { items: true },
+      }),
+      this.prisma.purchaseBill.findMany({
+        where: wherePurchases,
+        include: { items: true },
+      }),
+    ]);
 
     // Rate-wise calculation
     const rateBreakdown: Record<number, { taxableSales: number; outputGst: number; taxablePurchases: number; inputGst: number }> = {
@@ -2059,6 +2079,9 @@ export class FinanceService {
         assignedOutletIds: dto.assignedOutletIds || [],
         assignedUserIds: dto.assignedUserIds || [],
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -2118,27 +2141,27 @@ export class FinanceService {
     const userId = tenantContext.userId;
     const outletId = tenantContext.outletId;
 
-    const activeShift = await this.prisma.registerSession.findFirst({
-      where: {
-        organizationId: orgId,
-        openedByUserId: userId,
-        status: 'OPEN',
-      },
-      orderBy: { openedAt: 'desc' },
-      include: {
-        outlet: { select: { id: true, name: true, code: true } },
-      },
-    });
-
-    // 1. Held Orders for this cashier
-    const heldOrders = await this.prisma.heldOrder.findMany({
-      where: {
-        organizationId: orgId,
-        userId,
-        status: 'HELD',
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [activeShift, heldOrders] = await Promise.all([
+      this.prisma.registerSession.findFirst({
+        where: {
+          organizationId: orgId,
+          openedByUserId: userId,
+          status: 'OPEN',
+        },
+        orderBy: { openedAt: 'desc' },
+        include: {
+          outlet: { select: { id: true, name: true, code: true } },
+        },
+      }),
+      this.prisma.heldOrder.findMany({
+        where: {
+          organizationId: orgId,
+          userId,
+          status: 'HELD',
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
     const formattedHeldOrders = heldOrders.map((h) => {
       const diffMs = Date.now() - new Date(h.createdAt).getTime();
@@ -2182,28 +2205,28 @@ export class FinanceService {
       };
     }
 
-    // 2. Completed sales during this active shift
-    const shiftInvoices = await this.prisma.saleInvoice.findMany({
-      where: {
-        organizationId: orgId,
-        createdByUserId: userId,
-        createdAt: { gte: activeShift.openedAt },
-        paymentStatus: { in: ['PAID', 'PARTIALLY_PAID'] },
-      },
-      include: {
-        payments: true,
-      },
-    });
-
-    // 3. Payments during this active shift
-    const shiftPayments = await this.prisma.payment.findMany({
-      where: {
-        organizationId: orgId,
-        createdByUserId: userId,
-        transactionDate: { gte: activeShift.openedAt },
-        status: 'COMPLETED',
-      },
-    });
+    // 2. Completed sales & payments during this active shift (queried in parallel)
+    const [shiftInvoices, shiftPayments] = await Promise.all([
+      this.prisma.saleInvoice.findMany({
+        where: {
+          organizationId: orgId,
+          createdByUserId: userId,
+          createdAt: { gte: activeShift.openedAt },
+          paymentStatus: { in: ['PAID', 'PARTIALLY_PAID'] },
+        },
+        include: {
+          payments: true,
+        },
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          organizationId: orgId,
+          createdByUserId: userId,
+          transactionDate: { gte: activeShift.openedAt },
+          status: 'COMPLETED',
+        },
+      }),
+    ]);
 
     const openingFloat = activeShift.openingFloat || 0.0;
 
@@ -2459,6 +2482,9 @@ export class FinanceService {
       });
 
       return shift;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 

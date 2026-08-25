@@ -335,6 +335,9 @@ export class QuotationsService {
       });
 
       return quotation;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -489,6 +492,9 @@ export class QuotationsService {
       });
 
       return updated;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -779,6 +785,9 @@ export class QuotationsService {
       });
 
       return invoice;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 

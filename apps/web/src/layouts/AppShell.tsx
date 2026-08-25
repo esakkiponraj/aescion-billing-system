@@ -68,7 +68,7 @@ export const AppShell: React.FC = () => {
   const isCashier = roles.includes('CASHIER');
   const isAccountant = roles.includes('ACCOUNTANT');
 
-  // Real-time WebSocket connection & Cashier 15s Heartbeat
+  // Real-time WebSocket connection & Heartbeat for active session
   useEffect(() => {
     if (!user) {
       disconnectSocket();
@@ -77,18 +77,16 @@ export const AppShell: React.FC = () => {
 
     getSocket();
 
-    let heartbeatTimer: NodeJS.Timeout | null = null;
-    if (isCashier) {
+    // Send heartbeat immediately, then every 15 seconds to keep presence alive and update lastSeenAt
+    sendCashierHeartbeat();
+    const heartbeatTimer = setInterval(() => {
       sendCashierHeartbeat();
-      heartbeatTimer = setInterval(() => {
-        sendCashierHeartbeat();
-      }, 15000);
-    }
+    }, 15000);
 
     return () => {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      clearInterval(heartbeatTimer);
     };
-  }, [user, isCashier]);
+  }, [user]);
 
   // Lock body scroll when mobile drawer is open
   useEffect(() => {

@@ -21,29 +21,46 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     try {
       this.logger.log('Syncing System Permissions and Organization Default Roles...');
 
-      // 1. Upsert all system permissions
-      for (const perm of SYSTEM_PERMISSIONS) {
-        await this.permission.upsert({
-          where: { code: perm.code },
-          update: { description: perm.description, module: perm.module },
-          create: {
-            code: perm.code,
-            module: perm.module,
-            description: perm.description,
-          },
+      // 1. Bulk sync system permissions in a single query
+      const existingPermissions = await this.permission.findMany({
+        select: { id: true, code: true },
+      });
+      const existingCodeMap = new Map(existingPermissions.map((p) => [p.code, p.id]));
+
+      const missingPermissions = SYSTEM_PERMISSIONS.filter((p) => !existingCodeMap.has(p.code));
+      if (missingPermissions.length > 0) {
+        await this.permission.createMany({
+          data: missingPermissions.map((p) => ({
+            code: p.code,
+            module: p.module,
+            description: p.description,
+          })),
+          skipDuplicates: true,
         });
       }
 
-      const allPermissions = await this.permission.findMany();
-      const allOrgs = await this.organization.findMany();
+      // Re-fetch permissions if missing ones were inserted
+      const allPermissions =
+        missingPermissions.length > 0 ? await this.permission.findMany() : await this.permission.findMany();
+
+      // 2. Fetch all organizations with their existing roles & role permissions in one query
+      const allOrgs = await this.organization.findMany({
+        include: {
+          roles: {
+            include: {
+              rolePermissions: { select: { permissionId: true } },
+            },
+          },
+        },
+      });
 
       for (const org of allOrgs) {
+        const orgRoles = org.roles || [];
+
         // --- 1. OWNER Role ---
-        let ownerRole = await this.role.findFirst({
-          where: { organizationId: org.id, code: 'OWNER' },
-        });
+        let ownerRole = orgRoles.find((r) => r.code === 'OWNER');
         if (!ownerRole) {
-          ownerRole = await this.role.create({
+          ownerRole = (await this.role.create({
             data: {
               organizationId: org.id,
               name: 'Business Owner',
@@ -54,31 +71,26 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
               priceOverrideAllowed: true,
               approvalLimit: 10000000.0,
             },
-          });
+            include: { rolePermissions: true },
+          })) as any;
         }
-        const existingOwnerPerms = await this.rolePermission.findMany({
-          where: { roleId: ownerRole.id },
-        });
-        if (existingOwnerPerms.length < allPermissions.length) {
-          const existingPermIds = new Set(existingOwnerPerms.map((rp) => rp.permissionId));
-          const missingPerms = allPermissions.filter((p) => !existingPermIds.has(p.id));
-          if (missingPerms.length > 0) {
-            await this.rolePermission.createMany({
-              data: missingPerms.map((p) => ({
-                roleId: ownerRole!.id,
-                permissionId: p.id,
-                scope: 'ORGANIZATION',
-              })),
-            });
-          }
+        const existingOwnerPermIds = new Set((ownerRole.rolePermissions || []).map((rp: any) => rp.permissionId));
+        const missingOwnerPerms = allPermissions.filter((p) => !existingOwnerPermIds.has(p.id));
+        if (missingOwnerPerms.length > 0) {
+          await this.rolePermission.createMany({
+            data: missingOwnerPerms.map((p) => ({
+              roleId: ownerRole!.id,
+              permissionId: p.id,
+              scope: 'ORGANIZATION',
+            })),
+            skipDuplicates: true,
+          });
         }
 
         // --- 2. CASHIER Role ---
-        let cashierRole = await this.role.findFirst({
-          where: { organizationId: org.id, code: 'CASHIER' },
-        });
+        let cashierRole = orgRoles.find((r) => r.code === 'CASHIER');
         if (!cashierRole) {
-          cashierRole = await this.role.create({
+          cashierRole = (await this.role.create({
             data: {
               organizationId: org.id,
               name: 'Counter Cashier',
@@ -89,7 +101,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
               priceOverrideAllowed: false,
               approvalLimit: 1000.0,
             },
-          });
+            include: { rolePermissions: true },
+          })) as any;
         }
         const cashierTargetCodes = new Set([
           'pos.access',
@@ -108,10 +121,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
           'customers.read',
         ]);
         const cashierPerms = allPermissions.filter((p) => cashierTargetCodes.has(p.code));
-        const existingCashierPerms = await this.rolePermission.findMany({
-          where: { roleId: cashierRole.id },
-        });
-        const existingCashierPermIds = new Set(existingCashierPerms.map((rp) => rp.permissionId));
+        const existingCashierPermIds = new Set((cashierRole.rolePermissions || []).map((rp: any) => rp.permissionId));
         const missingCashierPerms = cashierPerms.filter((p) => !existingCashierPermIds.has(p.id));
         if (missingCashierPerms.length > 0) {
           await this.rolePermission.createMany({
@@ -120,15 +130,14 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
               permissionId: p.id,
               scope: 'OUTLET',
             })),
+            skipDuplicates: true,
           });
         }
 
         // --- 3. MANAGER Role ---
-        let managerRole = await this.role.findFirst({
-          where: { organizationId: org.id, code: 'MANAGER' },
-        });
+        let managerRole = orgRoles.find((r) => r.code === 'MANAGER');
         if (!managerRole) {
-          managerRole = await this.role.create({
+          managerRole = (await this.role.create({
             data: {
               organizationId: org.id,
               name: 'Store Manager',
@@ -139,15 +148,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
               priceOverrideAllowed: true,
               approvalLimit: 50000.0,
             },
-          });
+            include: { rolePermissions: true },
+          })) as any;
         }
         const managerPerms = allPermissions.filter(
           (p) => !p.code.includes('org.update') && !p.code.includes('reports.profit'),
         );
-        const existingMgrPerms = await this.rolePermission.findMany({
-          where: { roleId: managerRole.id },
-        });
-        const existingMgrPermIds = new Set(existingMgrPerms.map((rp) => rp.permissionId));
+        const existingMgrPermIds = new Set((managerRole.rolePermissions || []).map((rp: any) => rp.permissionId));
         const missingMgrPerms = managerPerms.filter((p) => !existingMgrPermIds.has(p.id));
         if (missingMgrPerms.length > 0) {
           await this.rolePermission.createMany({
@@ -156,15 +163,14 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
               permissionId: p.id,
               scope: 'OUTLET',
             })),
+            skipDuplicates: true,
           });
         }
 
         // --- 4. ACCOUNTANT Role ---
-        let accountantRole = await this.role.findFirst({
-          where: { organizationId: org.id, code: 'ACCOUNTANT' },
-        });
+        let accountantRole = orgRoles.find((r) => r.code === 'ACCOUNTANT');
         if (!accountantRole) {
-          accountantRole = await this.role.create({
+          accountantRole = (await this.role.create({
             data: {
               organizationId: org.id,
               name: 'Accountant',
@@ -175,7 +181,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
               priceOverrideAllowed: false,
               approvalLimit: 0.0,
             },
-          });
+            include: { rolePermissions: true },
+          })) as any;
         }
         const accountantPerms = allPermissions.filter(
           (p) =>
@@ -191,10 +198,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
             p.code === 'expense.update' ||
             p.code === 'products.read',
         );
-        const existingAcctPerms = await this.rolePermission.findMany({
-          where: { roleId: accountantRole.id },
-        });
-        const existingAcctPermIds = new Set(existingAcctPerms.map((rp) => rp.permissionId));
+        const existingAcctPermIds = new Set((accountantRole.rolePermissions || []).map((rp: any) => rp.permissionId));
         const missingAcctPerms = accountantPerms.filter((p) => !existingAcctPermIds.has(p.id));
         if (missingAcctPerms.length > 0) {
           await this.rolePermission.createMany({
@@ -203,6 +207,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
               permissionId: p.id,
               scope: 'ORGANIZATION',
             })),
+            skipDuplicates: true,
           });
         }
       }

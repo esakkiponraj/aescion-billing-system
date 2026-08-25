@@ -178,20 +178,18 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
     if (!lastHeartbeat) return false;
 
     const elapsed = Date.now() - lastHeartbeat;
-    return elapsed <= 45000;
+    return elapsed <= 60000;
   }
 
   /**
-   * Periodic sweep to detect missed heartbeats (> 45s).
+   * Periodic sweep to detect missed heartbeats (> 60s).
    */
   private sweepStaleConnections() {
     const now = Date.now();
-    const TIMEOUT_MS = 45000;
+    const TIMEOUT_MS = 60000;
 
     for (const [userId, lastHb] of this.userLastHeartbeat.entries()) {
       if (now - lastHb > TIMEOUT_MS) {
-        this.logger.warn(`[Presence] Cashier ${userId} heartbeat timed out (> 45s). Transitioning to INACTIVE.`);
-
         // Find metadata for orgs
         const sockets = this.userConnections.get(userId);
         let orgIds: string[] = [];
@@ -202,10 +200,14 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
             const m = this.socketToUser.get(sId);
             if (m) {
               orgIds = m.orgIds;
-              isCashier = m.isCashier;
+              if (m.isCashier) isCashier = true;
             }
             this.socketToUser.delete(sId);
           }
+        }
+
+        if (isCashier) {
+          this.logger.warn(`[Presence] Cashier ${userId} heartbeat timed out (> 60s). Transitioning to INACTIVE.`);
         }
 
         this.userConnections.delete(userId);

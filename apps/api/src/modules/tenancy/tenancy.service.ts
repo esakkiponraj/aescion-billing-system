@@ -134,6 +134,9 @@ export class TenancyService {
         organization: org,
         outlet: defaultOutlet,
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -206,6 +209,9 @@ export class TenancyService {
       });
 
       return outlet;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 

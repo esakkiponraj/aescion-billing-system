@@ -283,6 +283,9 @@ export class ReceiptsService {
       });
 
       return updatedReceipt;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 }

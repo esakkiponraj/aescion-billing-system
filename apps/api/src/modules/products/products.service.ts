@@ -324,6 +324,9 @@ export class ProductsService {
         assignedOutletIds: dto.assignedOutletIds || [],
         assignedUserIds: dto.assignedUserIds || [],
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 
@@ -568,6 +571,9 @@ export class ProductsService {
         assignedOutletIds: freshAccess?.outletAccess.map((oa) => oa.outletId) || [],
         assignedUserIds: freshAccess?.cashierAccess.map((ca) => ca.userId) || [],
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 

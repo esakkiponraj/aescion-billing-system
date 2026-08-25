@@ -1,11 +1,15 @@
-﻿import { useAuthStore } from '../stores/authStore';
+import { useAuthStore } from '../stores/authStore';
 import { useTenantStore } from '../stores/tenantStore';
 import { ApiResponse } from '@aescion/types';
 
 export const getApiBaseUrl = (): string => {
   const envUrl = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_API_BASE_URL;
   if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
-    return envUrl.trim().replace(/\/+$/, '');
+    let clean = envUrl.trim().replace(/\/+$/, '');
+    if (!clean.endsWith('/api/v1')) {
+      clean = `${clean}/api/v1`;
+    }
+    return clean;
   }
   return '/api/v1';
 };

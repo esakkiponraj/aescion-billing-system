@@ -62,6 +62,9 @@ export class OnboardingService {
       '-' +
       Math.floor(100 + Math.random() * 900);
 
+    // Prefetch all system permissions outside the transaction to reduce transaction duration
+    const allPermissions = await this.prisma.permission.findMany();
+
     return this.prisma.$transaction(async (tx) => {
       // 1. Create Organization
       const org = await tx.organization.create({
@@ -120,8 +123,6 @@ export class OnboardingService {
       }
 
       // 4. Create Standard System Roles for this Organization
-      const allPermissions = await tx.permission.findMany();
-
       // 4.1 Owner Role (Full Org scope, unlimited authority)
       const ownerRole = await tx.role.create({
         data: {
@@ -314,8 +315,8 @@ export class OnboardingService {
         outlets: outletsCreated,
       };
     }, {
-      maxWait: 10_000,
-      timeout: 30_000,
+      maxWait: 20_000,
+      timeout: 60_000,
     });
   }
 }
