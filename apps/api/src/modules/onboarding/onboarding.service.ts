@@ -307,12 +307,15 @@ export class OnboardingService {
         },
       });
 
-      return {
+            return {
         message: 'Onboarding completed successfully.',
         organization: org,
         primaryOutlet,
         outlets: outletsCreated,
       };
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 }
