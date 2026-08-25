@@ -12,6 +12,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -41,6 +42,17 @@ export class AuthController {
       userAgent: req.headers['user-agent'],
     };
     return this.authService.login(dto, meta);
+  }
+
+  @Public()
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  async googleLogin(@Body() dto: GoogleLoginDto, @Req() req: Request) {
+    const meta = {
+      ip: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent'],
+    };
+    return this.authService.googleLogin(dto, meta);
   }
 
   @Public()

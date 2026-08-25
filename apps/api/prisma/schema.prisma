@@ -10,11 +10,15 @@ datasource db {
 model User {
   id                       String                   @id @default(uuid())
   email                    String                   @unique
-  passwordHash             String
+  passwordHash             String?
   firstName                String
   lastName                 String
   phone                    String?
   avatarUrl                String?
+  googleSub                String?                  @unique
+  authProvider             String                   @default("LOCAL")
+  googleLinkedAt           DateTime?
+  isEmailVerified          Boolean                  @default(false)
   isSuperAdmin             Boolean                  @default(false)
   isActive                 Boolean                  @default(true)
   lastSeenAt               DateTime?

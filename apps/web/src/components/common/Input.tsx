@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -9,6 +9,7 @@ export interface InputProps
   helperText?: string;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
+  rightElement?: React.ReactNode;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
@@ -19,6 +20,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       helperText,
       leftIcon,
       rightIcon,
+      rightElement,
       className,
       disabled,
       ...props
@@ -45,7 +47,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               clsx(
                 'w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 placeholder-slate-400 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 disabled:opacity-50 disabled:bg-slate-50 shadow-sm',
                 leftIcon && 'pl-10',
-                rightIcon && 'pr-10',
+                (rightIcon || rightElement) && 'pr-10',
                 error && 'border-rose-500 focus:ring-rose-500/20 focus:border-rose-500',
                 className,
               ),
@@ -55,6 +57,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           {rightIcon && (
             <div className="absolute right-3.5 flex items-center pointer-events-none text-slate-400">
               {rightIcon}
+            </div>
+          )}
+          {rightElement && (
+            <div className="absolute right-2.5 flex items-center">
+              {rightElement}
             </div>
           )}
         </div>

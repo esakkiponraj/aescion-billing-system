@@ -4,13 +4,16 @@ import {
   ConflictException,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import * as bcrypt from 'bcryptjs';
+import { OAuth2Client } from 'google-auth-library';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { GoogleLoginDto } from './dto/google-login.dto';
 import {
   AuthSessionResponse,
   AuthenticatedUser,
@@ -20,11 +23,16 @@ import {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private googleClient: OAuth2Client;
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
-  ) {}
+  ) {
+    this.googleClient = new OAuth2Client();
+  }
 
   async register(dto: RegisterDto): Promise<AuthSessionResponse> {
     const existing = await this.prisma.user.findUnique({
@@ -46,6 +54,7 @@ export class AuthService {
         phone: dto.phone,
         isSuperAdmin: false,
         isActive: true,
+        authProvider: 'LOCAL',
       },
     });
 
@@ -68,12 +77,164 @@ export class AuthService {
       throw new UnauthorizedException('Your account has been suspended. Contact your business administrator.');
     }
 
+    if (!user.passwordHash) {
+      throw new UnauthorizedException(
+        'This account was created with Google Sign-In. Please click "Continue with Google" to sign in.',
+      );
+    }
+
     const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!isMatch) {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
     return this.generateAuthResponse(user, meta);
+  }
+
+  async googleLogin(
+    dto: GoogleLoginDto,
+    meta?: { ip?: string; userAgent?: string },
+  ): Promise<AuthSessionResponse> {
+    const googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+
+    let ticket;
+    try {
+      ticket = await this.googleClient.verifyIdToken({
+        idToken: dto.idToken,
+        audience: googleClientId ? [googleClientId] : undefined,
+      });
+    } catch (err: any) {
+      this.logger.warn(`Google token verification failed: ${err?.message}`);
+      throw new UnauthorizedException('Invalid or expired Google authentication token.');
+    }
+
+    const payload = ticket.getPayload();
+    if (!payload) {
+      throw new UnauthorizedException('Unable to extract Google user credentials.');
+    }
+
+    const googleSub = payload.sub;
+    const email = payload.email?.toLowerCase().trim();
+    const emailVerified = payload.email_verified;
+    const firstName = payload.given_name || payload.name?.split(' ')[0] || 'User';
+    const lastName = payload.family_name || (payload.name?.split(' ').length ? payload.name.split(' ').slice(1).join(' ') : '') || '';
+    const avatarUrl = payload.picture || null;
+
+    if (!googleSub || !email) {
+      throw new UnauthorizedException('Google identity missing required identifiers.');
+    }
+
+    if (emailVerified === false) {
+      throw new UnauthorizedException(
+        'Your Google email address is not verified. Please verify your Google account before signing in.',
+      );
+    }
+
+    // 1. Check if user already exists by googleSub
+    const existingByGoogleSub = await this.prisma.user.findUnique({
+      where: { googleSub },
+    });
+
+    if (existingByGoogleSub) {
+      if (!existingByGoogleSub.isActive) {
+        throw new UnauthorizedException(
+          'Your account has been suspended. Contact your business administrator.',
+        );
+      }
+
+      // Update avatar if newly available
+      if (avatarUrl && !existingByGoogleSub.avatarUrl) {
+        await this.prisma.user.update({
+          where: { id: existingByGoogleSub.id },
+          data: { avatarUrl },
+        });
+        existingByGoogleSub.avatarUrl = avatarUrl;
+      }
+
+      return this.generateAuthResponse(existingByGoogleSub, meta);
+    }
+
+    // 2. Check if user exists with matching email but googleSub is not linked yet
+    const existingByEmail = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existingByEmail) {
+      if (!existingByEmail.isActive) {
+        throw new UnauthorizedException(
+          'Your account has been suspended. Contact your business administrator.',
+        );
+      }
+
+      // If user provided their existing password for account linking
+      if (dto.linkPassword) {
+        if (!existingByEmail.passwordHash) {
+          throw new UnauthorizedException('Existing account has no password set.');
+        }
+
+        const isMatch = await bcrypt.compare(dto.linkPassword, existingByEmail.passwordHash);
+        if (!isMatch) {
+          throw new UnauthorizedException(
+            'Invalid password for account linking. Please enter your existing AESCION password.',
+          );
+        }
+
+        // Link Google account to existing user
+        const updatedUser = await this.prisma.user.update({
+          where: { id: existingByEmail.id },
+          data: {
+            googleSub,
+            googleLinkedAt: new Date(),
+            authProvider: 'LOCAL_AND_GOOGLE',
+            avatarUrl: existingByEmail.avatarUrl || avatarUrl,
+            isEmailVerified: true,
+          },
+        });
+
+        return this.generateAuthResponse(updatedUser, meta);
+      }
+
+      // Password not provided yet -> Prompt user to confirm password to link account
+      return {
+        user: {
+          id: existingByEmail.id,
+          email: existingByEmail.email,
+          firstName: existingByEmail.firstName,
+          lastName: existingByEmail.lastName,
+          phone: existingByEmail.phone,
+          avatarUrl: existingByEmail.avatarUrl,
+          isSuperAdmin: existingByEmail.isSuperAdmin,
+          isActive: existingByEmail.isActive,
+        },
+        organizations: [],
+        requiresPasswordLink: true,
+        googleEmail: email,
+        message:
+          'An account with this email address already exists. Please confirm your password to link your Google account.',
+      };
+    }
+
+    // 3. Brand new Google user: Provision minimal profile and redirect to Onboarding
+    const newUser = await this.prisma.user.create({
+      data: {
+        email,
+        firstName,
+        lastName,
+        avatarUrl,
+        googleSub,
+        authProvider: 'GOOGLE',
+        isEmailVerified: true,
+        isSuperAdmin: false,
+        isActive: true,
+        passwordHash: null,
+      },
+    });
+
+    const authRes = await this.generateAuthResponse(newUser, meta);
+    return {
+      ...authRes,
+      isNewUser: true,
+    };
   }
 
   async refreshToken(

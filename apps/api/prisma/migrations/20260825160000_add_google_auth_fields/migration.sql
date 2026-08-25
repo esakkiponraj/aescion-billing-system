@@ -1,0 +1,9 @@
+-- AlterTable
+ALTER TABLE "users" ALTER COLUMN "passwordHash" DROP NOT NULL;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "googleSub" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "authProvider" TEXT NOT NULL DEFAULT 'LOCAL';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "googleLinkedAt" TIMESTAMP(3);
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "isEmailVerified" BOOLEAN NOT NULL DEFAULT false;
+
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "users_googleSub_key" ON "users"("googleSub");

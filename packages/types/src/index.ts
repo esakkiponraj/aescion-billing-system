@@ -238,6 +238,10 @@ export interface AuthSessionResponse {
   tokens?: AuthTokens;
   organizations: UserOrganizationSummary[];
   activeTenantContext?: TenantContext;
+  requiresPasswordLink?: boolean;
+  isNewUser?: boolean;
+  googleEmail?: string;
+  message?: string;
 }
 
 export interface UserOrganizationSummary {
