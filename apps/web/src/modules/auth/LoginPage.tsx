@@ -33,7 +33,7 @@ export const LoginPage: React.FC = () => {
   const { setActiveTenant } = useTenantStore();
 
   const DEFAULT_GOOGLE_CLIENT_ID =
-    '814103900549-4e6upscort13og9q3ccjimmonnk6to8k.apps.googleusercontent.com';
+    '814103900549-6mq2qqkk4paeamanqtne93ba6tglr13a.apps.googleusercontent.com';
 
   const googleClientId =
     (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
