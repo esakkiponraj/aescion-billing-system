@@ -37,6 +37,8 @@ export const LoginPage: React.FC = () => {
     (import.meta as any).env?.GOOGLE_CLIENT_ID ||
     '';
 
+  const isGoogleConfigured = Boolean(googleClientId && googleClientId.trim());
+
   // Process successful authenticated session
   const handleAuthSuccess = (res: AuthSessionResponse) => {
     const user = res?.user;
@@ -112,6 +114,10 @@ export const LoginPage: React.FC = () => {
 
   // 2. Initialize Google Identity Services SDK
   useEffect(() => {
+    if (!isGoogleConfigured) {
+      return;
+    }
+
     let checkInterval: NodeJS.Timeout | null = null;
 
     const initGsi = () => {
@@ -156,10 +162,15 @@ export const LoginPage: React.FC = () => {
     return () => {
       if (checkInterval) clearInterval(checkInterval);
     };
-  }, [googleClientId]);
+  }, [googleClientId, isGoogleConfigured]);
 
   // Fallback Google Sign-In prompt trigger
   const handleManualGoogleClick = () => {
+    if (!isGoogleConfigured) {
+      setError('Google Sign-In is not configured. Please set the VITE_GOOGLE_CLIENT_ID environment variable.');
+      return;
+    }
+
     if (window.google?.accounts?.id) {
       setIsGoogleLoading(true);
       setError(null);
@@ -267,14 +278,14 @@ export const LoginPage: React.FC = () => {
         <div className="space-y-4">
           {/* 1. Official Google Sign-In Container */}
           <div className="w-full flex flex-col items-center justify-center">
-            {googleClientId ? (
+            {isGoogleConfigured ? (
               <div className="w-full flex justify-center min-h-[44px]">
                 <div ref={googleButtonRef} className="w-full flex justify-center" />
               </div>
             ) : null}
 
             {/* Fallback Styled Google Button if GIS iframe is initializing or if clicked directly */}
-            {(!googleClientId || isGoogleLoading) && (
+            {(!isGoogleConfigured || isGoogleLoading) && (
               <button
                 type="button"
                 onClick={handleManualGoogleClick}
