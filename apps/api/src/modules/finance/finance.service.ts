@@ -690,7 +690,7 @@ export class FinanceService {
       }[];
       discountPercent?: number;
       additionalCharges?: number;
-      paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CREDIT';
+      paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CREDIT' | 'RAZORPAY';
       paidAmount?: number;
       dueDate?: string;
       isPosSale?: boolean;
@@ -804,7 +804,7 @@ export class FinanceService {
     });
 
     const totalAmount = taxableAmount + cgstAmount + sgstAmount + additionalCharges;
-    const isCredit = dto.paymentMethod === 'CREDIT';
+    const isCredit = dto.paymentMethod === 'CREDIT' || dto.paymentMethod === 'RAZORPAY';
     const paidAmount = isCredit ? (Number(dto.paidAmount) || 0) : totalAmount;
     const outstandingAmount = Math.max(0, totalAmount - paidAmount);
     const paymentStatus = outstandingAmount === 0 ? 'PAID' : paidAmount > 0 ? 'PARTIALLY_PAID' : 'UNPAID';

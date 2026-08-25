@@ -29,6 +29,7 @@ import {
   Play,
   Lock,
   Unlock,
+  Globe,
 } from 'lucide-react';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
@@ -38,6 +39,7 @@ import { Modal } from '../../components/common/Modal';
 import { useTenantStore } from '../../stores/tenantStore';
 import { useAuthStore } from '../../stores/authStore';
 import { apiRequest } from '../../services/api';
+import { createRazorpayOrder, launchRazorpayCheckout } from '../../services/razorpay';
 import { getBusinessTypeCapability } from '@aescion/types';
 
 interface CartItem {
@@ -71,7 +73,7 @@ interface RestaurantTable {
   orderNumber?: string;
   items: CartItem[];
   discountPercent: number;
-  paymentMethod?: 'CASH' | 'UPI' | 'CARD' | 'CREDIT';
+  paymentMethod?: 'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'RAZORPAY';
   invoiceId?: string;
   invoiceData?: any;
   orderTime?: string;
@@ -109,7 +111,7 @@ export const PosPage: React.FC = () => {
   // Fast Billing Cart State (for retail/fast POS)
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'UPI' | 'CARD' | 'CREDIT'>('UPI');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'CASH' | 'UPI' | 'CARD' | 'CREDIT' | 'RAZORPAY'>('UPI');
 
   // Restaurant Tables & Orders State
   const [tables, setTables] = useState<RestaurantTable[]>([
@@ -481,6 +483,72 @@ export const PosPage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+
+      if (selectedPaymentMethod === 'RAZORPAY') {
+        try {
+          const orderData = await createRazorpayOrder({ invoiceId: savedInvoice.id });
+          await launchRazorpayCheckout({
+            orderData,
+            onSuccess: (verifiedResult) => {
+              const fullReceipt = {
+                ...savedInvoice,
+                paymentStatus: 'PAID',
+                paidAmount: savedInvoice.totalAmount,
+                outstandingAmount: 0,
+                receiptNumber: verifiedResult.receiptNumber,
+                tableNumber: activeTab === 'TABLES' ? activeTable.tableNumber : null,
+                orderType: activeTab === 'TABLES' ? activeTable.orderType : 'RETAIL',
+                cashierName: `${user?.firstName || 'Staff'} ${user?.lastName || ''}`.trim(),
+                paymentMethod: 'RAZORPAY',
+              };
+
+              try {
+                window.dispatchEvent(new CustomEvent('aescion:sale-completed', { detail: fullReceipt }));
+                if (typeof BroadcastChannel !== 'undefined') {
+                  const channel = new BroadcastChannel('aescion_events');
+                  channel.postMessage({ type: 'SALE_COMPLETED', data: fullReceipt, timestamp: Date.now() });
+                  channel.close();
+                }
+              } catch (evtErr) {
+                console.warn('Real-time event broadcast error:', evtErr);
+              }
+
+              if (activeTab === 'TABLES') {
+                setTables((prev) =>
+                  prev.map((t) => {
+                    if (t.id === selectedTableId) {
+                      return {
+                        ...t,
+                        status: 'PAID',
+                        paymentMethod: 'RAZORPAY',
+                        invoiceId: savedInvoice.id,
+                        invoiceData: fullReceipt,
+                      };
+                    }
+                    return t;
+                  }),
+                );
+              } else {
+                setCart([]);
+                setDiscountPercent(0);
+              }
+
+              setReceiptData(fullReceipt);
+              setIsReceiptModalOpen(true);
+            },
+            onError: (payErr) => {
+              alert(`Razorpay checkout failed: ${payErr.message || 'Payment was declined or cancelled.'}`);
+            },
+            onDismiss: () => {
+              console.log('Razorpay modal closed by user.');
+            },
+          });
+          return;
+        } catch (rzpErr: any) {
+          alert(`Could not initiate Razorpay checkout: ${rzpErr.message}`);
+          return;
+        }
+      }
 
       const fullReceipt = {
         ...savedInvoice,
@@ -997,17 +1065,18 @@ export const PosPage: React.FC = () => {
 
             {/* Payment Method Selector */}
             {(!activeTable || activeTable.status !== 'PAID') && (
-              <div className="grid grid-cols-4 gap-1 pt-1">
+              <div className="grid grid-cols-5 gap-1 pt-1">
                 {[
                   { id: 'CASH', label: 'Cash', icon: <Banknote className="w-3 h-3" /> },
                   { id: 'UPI', label: 'UPI QR', icon: <QrCode className="w-3 h-3" /> },
                   { id: 'CARD', label: 'Card', icon: <CreditCard className="w-3 h-3" /> },
+                  { id: 'RAZORPAY', label: 'Razorpay', icon: <Globe className="w-3 h-3 text-blue-600" /> },
                   { id: 'CREDIT', label: 'Credit', icon: <Receipt className="w-3 h-3" /> },
                 ].map((pm) => (
                   <button
                     key={pm.id}
                     onClick={() => setSelectedPaymentMethod(pm.id as any)}
-                    className={`p-1.5 rounded-md border text-[10px] font-bold flex flex-col items-center gap-0.5 transition-all ${
+                    className={`p-1 rounded-md border text-[9px] font-bold flex flex-col items-center gap-0.5 transition-all ${
                       selectedPaymentMethod === pm.id
                         ? 'bg-brand-50 border-brand-500 text-brand-700 shadow-xs'
                         : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'

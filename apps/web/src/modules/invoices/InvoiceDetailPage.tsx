@@ -17,6 +17,7 @@ import {
   Receipt as ReceiptIcon,
 } from 'lucide-react';
 import { apiRequest } from '../../services/api';
+import { createRazorpayOrder, launchRazorpayCheckout } from '../../services/razorpay';
 import { useAuthStore } from '../../stores/authStore';
 import { useTenantStore } from '../../stores/tenantStore';
 import { DocumentPrintModal, DocumentPrintData } from '../../components/common/DocumentPrintModal';
@@ -34,7 +35,9 @@ export const InvoiceDetailPage: React.FC = () => {
   // Payment Recording Modal State
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER'>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<
+    'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER' | 'RAZORPAY'
+  >('RAZORPAY');
   const [referenceNumber, setReferenceNumber] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
   const [recordingPayment, setRecordingPayment] = useState(false);
@@ -75,6 +78,39 @@ export const InvoiceDetailPage: React.FC = () => {
     }
     if (paymentAmount > invoice.outstandingAmount) {
       alert(`Payment amount cannot exceed outstanding balance of ₹${invoice.outstandingAmount.toFixed(2)}`);
+      return;
+    }
+
+    if (paymentMethod === 'RAZORPAY') {
+      try {
+        setRecordingPayment(true);
+        const orderData = await createRazorpayOrder({
+          invoiceId: invoice.id,
+          amount: Number(paymentAmount),
+          notes: paymentNotes ? { notes: paymentNotes } : undefined,
+        });
+
+        await launchRazorpayCheckout({
+          orderData,
+          onSuccess: (verifiedResult) => {
+            setIsPaymentOpen(false);
+            setReferenceNumber('');
+            setPaymentNotes('');
+            fetchInvoice();
+            alert(`Payment Successful! Receipt #${verifiedResult.receiptNumber} generated.`);
+          },
+          onError: (payErr) => {
+            alert(`Razorpay payment failed: ${payErr.message || 'Payment was declined or cancelled.'}`);
+          },
+          onDismiss: () => {
+            console.log('Razorpay checkout closed by user.');
+          },
+        });
+      } catch (err: any) {
+        alert(err.message || 'Failed to initiate Razorpay checkout');
+      } finally {
+        setRecordingPayment(false);
+      }
       return;
     }
 
@@ -547,6 +583,7 @@ export const InvoiceDetailPage: React.FC = () => {
                   onChange={(e: any) => setPaymentMethod(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:bg-white"
                 >
+                  <option value="RAZORPAY">Razorpay Online Gateway (UPI / QR / Cards / NetBanking)</option>
                   <option value="CASH">Cash</option>
                   <option value="UPI">UPI / QR Code</option>
                   <option value="CARD">Debit / Credit Card</option>
