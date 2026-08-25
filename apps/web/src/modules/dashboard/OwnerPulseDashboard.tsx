@@ -141,22 +141,31 @@ export const OwnerPulseDashboard: React.FC = () => {
       });
     });
 
+    let refreshTimer: NodeJS.Timeout | null = null;
+    const debouncedRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        fetchDashboardData(true);
+      }, 350);
+    };
+
     // Re-fetch dashboard data when owner socket reconnects to avoid stale presence state
     const unsubscribeConnect = onSocketConnect(() => {
-      fetchDashboardData(true);
+      debouncedRefresh();
     });
 
     const unsubscribeReceipt = subscribeToEvent('receipt:generated', (data) => {
       console.log('[Owner Dashboard] Live receipt generated event:', data);
-      fetchDashboardData(true);
+      debouncedRefresh();
     });
 
     const unsubscribeInvoice = subscribeToEvent('invoice:updated', (data) => {
       console.log('[Owner Dashboard] Live invoice updated event:', data);
-      fetchDashboardData(true);
+      debouncedRefresh();
     });
 
     return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
       unsubscribePresence();
       unsubscribeConnect();
       unsubscribeReceipt();
@@ -166,9 +175,17 @@ export const OwnerPulseDashboard: React.FC = () => {
 
   // Real-Time Event Sync: Listen for POS Sale Completion in Current Tab & Cross-Tabs
   useEffect(() => {
+    let refreshTimer: NodeJS.Timeout | null = null;
+    const debouncedRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        fetchDashboardData(true);
+      }, 350);
+    };
+
     const handleSaleEvent = (e: any) => {
       console.log('Real-time sale detected! Live refresh triggered on Owner Dashboard:', e?.detail);
-      fetchDashboardData(true);
+      debouncedRefresh();
     };
 
     window.addEventListener('aescion:sale-completed', handleSaleEvent);
@@ -180,7 +197,7 @@ export const OwnerPulseDashboard: React.FC = () => {
         channel.onmessage = (msg) => {
           if (msg.data?.type === 'SALE_COMPLETED') {
             console.log('Cross-tab real-time sale received:', msg.data);
-            fetchDashboardData(true);
+            debouncedRefresh();
           }
         };
       } catch (err) {
@@ -188,12 +205,13 @@ export const OwnerPulseDashboard: React.FC = () => {
       }
     }
 
-    // Heartbeat auto-poll every 20 seconds for fallback real-time live synchronization
+    // Heartbeat auto-poll every 60 seconds as safety fallback
     const intervalId = setInterval(() => {
       fetchDashboardData(true);
-    }, 20000);
+    }, 60000);
 
     return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
       window.removeEventListener('aescion:sale-completed', handleSaleEvent);
       if (channel) channel.close();
       clearInterval(intervalId);

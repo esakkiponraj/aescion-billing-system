@@ -21,6 +21,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useTenantStore } from '../../stores/tenantStore';
 import { DocumentPrintModal, DocumentPrintData } from '../../components/common/DocumentPrintModal';
 import { getSocket } from '../../services/socket';
+import { useDebounce } from '../../hooks/useDebounce';
 
 export const QuotationsListPage: React.FC = () => {
   const navigate = useNavigate();
@@ -33,6 +34,7 @@ export const QuotationsListPage: React.FC = () => {
   const [quotations, setQuotations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [cashierFilter, setCashierFilter] = useState('ALL');
   const [cashiers, setCashiers] = useState<{ id: string; name: string }[]>([]);
@@ -45,7 +47,7 @@ export const QuotationsListPage: React.FC = () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
-      if (search) params.append('search', search);
+      if (debouncedSearch) params.append('search', debouncedSearch);
       if (statusFilter !== 'ALL') params.append('status', statusFilter);
       if (cashierFilter !== 'ALL') params.append('cashierId', cashierFilter);
       if (activeOutletId) params.append('outletId', activeOutletId);
@@ -69,7 +71,7 @@ export const QuotationsListPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, cashierFilter, activeOutletId, isOwner]);
+  }, [debouncedSearch, statusFilter, cashierFilter, activeOutletId, isOwner]);
 
   useEffect(() => {
     fetchQuotations();

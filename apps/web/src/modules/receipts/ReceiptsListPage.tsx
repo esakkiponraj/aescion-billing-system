@@ -21,6 +21,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useTenantStore } from '../../stores/tenantStore';
 import { DocumentPrintModal, DocumentPrintData } from '../../components/common/DocumentPrintModal';
 import { getSocket } from '../../services/socket';
+import { useDebounce } from '../../hooks/useDebounce';
 
 export const ReceiptsListPage: React.FC = () => {
   const navigate = useNavigate();
@@ -33,6 +34,7 @@ export const ReceiptsListPage: React.FC = () => {
   const [receipts, setReceipts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('ALL');
   const [cashierFilter, setCashierFilter] = useState('ALL');
@@ -46,7 +48,7 @@ export const ReceiptsListPage: React.FC = () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
-      if (search) params.append('search', search);
+      if (debouncedSearch) params.append('search', debouncedSearch);
       if (statusFilter !== 'ALL') params.append('status', statusFilter);
       if (paymentMethodFilter !== 'ALL') params.append('paymentMethod', paymentMethodFilter);
       if (cashierFilter !== 'ALL') params.append('cashierId', cashierFilter);
@@ -70,7 +72,7 @@ export const ReceiptsListPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, paymentMethodFilter, cashierFilter, activeOutletId, isOwner]);
+  }, [debouncedSearch, statusFilter, paymentMethodFilter, cashierFilter, activeOutletId, isOwner]);
 
   useEffect(() => {
     fetchReceipts();

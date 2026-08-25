@@ -479,6 +479,8 @@ model Product {
 
   @@unique([organizationId, sku])
   @@index([organizationId])
+  @@index([organizationId, category])
+  @@index([organizationId, stockQty])
   @@map("products")
 }
 
@@ -529,6 +531,10 @@ model SaleInvoice {
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, outletId])
   @@index([organizationId, createdAt])
+  @@index([organizationId, outletId, createdAt])
+  @@index([organizationId, paymentStatus, createdAt])
+  @@index([organizationId, createdByUserId, createdAt])
+  @@index([organizationId, customerId, createdAt])
   @@index([registerSessionId])
   @@index([paymentStatus])
   @@map("sale_invoices")
@@ -587,6 +593,8 @@ model PurchaseBill {
   @@unique([organizationId, billNumber])
   @@index([organizationId, outletId])
   @@index([organizationId, purchaseDate])
+  @@index([organizationId, outletId, purchaseDate])
+  @@index([organizationId, paymentStatus, purchaseDate])
   @@index([paymentStatus])
   @@map("purchase_bills")
 }
@@ -673,6 +681,8 @@ model Expense {
   @@unique([organizationId, expenseNumber])
   @@index([organizationId, outletId])
   @@index([organizationId, expenseDate])
+  @@index([organizationId, outletId, expenseDate])
+  @@index([organizationId, status, expenseDate])
   @@map("expenses")
 }
 
@@ -803,6 +813,9 @@ model Quotation {
   @@unique([organizationId, quotationNumber])
   @@index([organizationId, outletId])
   @@index([organizationId, createdAt])
+  @@index([organizationId, outletId, createdAt])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, createdByUserId, createdAt])
   @@index([status])
   @@index([createdByUserId])
   @@map("quotations")
@@ -866,6 +879,10 @@ model Receipt {
   @@unique([organizationId, receiptNumber])
   @@index([organizationId, outletId])
   @@index([organizationId, paymentDate])
+  @@index([organizationId, outletId, paymentDate])
+  @@index([organizationId, paymentMethod, paymentDate])
+  @@index([organizationId, status, paymentDate])
+  @@index([organizationId, createdByUserId, paymentDate])
   @@index([invoiceId])
   @@index([status])
   @@index([createdByUserId])

@@ -11,6 +11,18 @@ export default defineConfig({
       '@aescion/types': path.resolve(__dirname, '../../packages/types/src'),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom', 'zustand'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-socket': ['socket.io-client'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

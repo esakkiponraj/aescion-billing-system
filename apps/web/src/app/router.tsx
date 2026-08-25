@@ -1,25 +1,38 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '../layouts/AppShell';
 import { AuthLayout } from '../layouts/AuthLayout';
-import { LoginPage } from '../modules/auth/LoginPage';
-import { OnboardingWizard } from '../modules/onboarding/OnboardingWizard';
-import { DashboardSwitcher } from '../modules/dashboard/DashboardSwitcher';
-import { PosPage } from '../modules/pos/PosPage';
-import { EmployeesPage } from '../modules/iam/EmployeesPage';
-import { RolesPage } from '../modules/iam/RolesPage';
-import { OrganizationSettingsPage } from '../modules/settings/OrganizationSettingsPage';
-import { SuperAdminDashboard } from '../modules/super-admin/SuperAdminDashboard';
-import { ProductsPage } from '../modules/products/ProductsPage';
-import { QuotationsListPage } from '../modules/quotations/QuotationsListPage';
-import { QuotationFormPage } from '../modules/quotations/QuotationFormPage';
-import { QuotationDetailPage } from '../modules/quotations/QuotationDetailPage';
-import { InvoicesListPage } from '../modules/invoices/InvoicesListPage';
-import { InvoiceFormPage } from '../modules/invoices/InvoiceFormPage';
-import { InvoiceDetailPage } from '../modules/invoices/InvoiceDetailPage';
-import { ReceiptsListPage } from '../modules/receipts/ReceiptsListPage';
-import { ReceiptDetailPage } from '../modules/receipts/ReceiptDetailPage';
 import { useAuthStore } from '../stores/authStore';
+
+const LoginPage = lazy(() => import('../modules/auth/LoginPage').then(m => ({ default: m.LoginPage })));
+const OnboardingWizard = lazy(() => import('../modules/onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
+const DashboardSwitcher = lazy(() => import('../modules/dashboard/DashboardSwitcher').then(m => ({ default: m.DashboardSwitcher })));
+const PosPage = lazy(() => import('../modules/pos/PosPage').then(m => ({ default: m.PosPage })));
+const EmployeesPage = lazy(() => import('../modules/iam/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
+const RolesPage = lazy(() => import('../modules/iam/RolesPage').then(m => ({ default: m.RolesPage })));
+const OrganizationSettingsPage = lazy(() => import('../modules/settings/OrganizationSettingsPage').then(m => ({ default: m.OrganizationSettingsPage })));
+const SuperAdminDashboard = lazy(() => import('../modules/super-admin/SuperAdminDashboard').then(m => ({ default: m.SuperAdminDashboard })));
+const ProductsPage = lazy(() => import('../modules/products/ProductsPage').then(m => ({ default: m.ProductsPage })));
+const QuotationsListPage = lazy(() => import('../modules/quotations/QuotationsListPage').then(m => ({ default: m.QuotationsListPage })));
+const QuotationFormPage = lazy(() => import('../modules/quotations/QuotationFormPage').then(m => ({ default: m.QuotationFormPage })));
+const QuotationDetailPage = lazy(() => import('../modules/quotations/QuotationDetailPage').then(m => ({ default: m.QuotationDetailPage })));
+const InvoicesListPage = lazy(() => import('../modules/invoices/InvoicesListPage').then(m => ({ default: m.InvoicesListPage })));
+const InvoiceFormPage = lazy(() => import('../modules/invoices/InvoiceFormPage').then(m => ({ default: m.InvoiceFormPage })));
+const InvoiceDetailPage = lazy(() => import('../modules/invoices/InvoiceDetailPage').then(m => ({ default: m.InvoiceDetailPage })));
+const ReceiptsListPage = lazy(() => import('../modules/receipts/ReceiptsListPage').then(m => ({ default: m.ReceiptsListPage })));
+const ReceiptDetailPage = lazy(() => import('../modules/receipts/ReceiptDetailPage').then(m => ({ default: m.ReceiptDetailPage })));
+
+const PageLoader: React.FC = () => (
+  <div className="flex h-full min-h-[300px] w-full items-center justify-center">
+    <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent"></div>
+  </div>
+);
+
+const LazyRoute: React.FC<{ component: React.ComponentType }> = ({ component: Component }) => (
+  <Suspense fallback={<PageLoader />}>
+    <Component />
+  </Suspense>
+);
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useAuthStore();
@@ -36,13 +49,13 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <LoginPage />,
+        element: <LazyRoute component={LoginPage} />,
       },
     ],
   },
   {
     path: '/onboarding',
-    element: <OnboardingWizard />,
+    element: <LazyRoute component={OnboardingWizard} />,
   },
   {
     path: '/',
@@ -58,70 +71,70 @@ export const router = createBrowserRouter([
       },
       {
         path: 'dashboard',
-        element: <DashboardSwitcher />,
+        element: <LazyRoute component={DashboardSwitcher} />,
       },
       {
         path: 'pos',
-        element: <PosPage />,
+        element: <LazyRoute component={PosPage} />,
       },
       {
         path: 'products',
-        element: <ProductsPage />,
+        element: <LazyRoute component={ProductsPage} />,
       },
       // Quotation Routes
       {
         path: 'quotations',
-        element: <QuotationsListPage />,
+        element: <LazyRoute component={QuotationsListPage} />,
       },
       {
         path: 'quotations/new',
-        element: <QuotationFormPage />,
+        element: <LazyRoute component={QuotationFormPage} />,
       },
       {
         path: 'quotations/:id',
-        element: <QuotationDetailPage />,
+        element: <LazyRoute component={QuotationDetailPage} />,
       },
       {
         path: 'quotations/:id/edit',
-        element: <QuotationFormPage />,
+        element: <LazyRoute component={QuotationFormPage} />,
       },
       // Invoice Routes
       {
         path: 'invoices',
-        element: <InvoicesListPage />,
+        element: <LazyRoute component={InvoicesListPage} />,
       },
       {
         path: 'invoices/new',
-        element: <InvoiceFormPage />,
+        element: <LazyRoute component={InvoiceFormPage} />,
       },
       {
         path: 'invoices/:id',
-        element: <InvoiceDetailPage />,
+        element: <LazyRoute component={InvoiceDetailPage} />,
       },
       // Receipt Routes
       {
         path: 'receipts',
-        element: <ReceiptsListPage />,
+        element: <LazyRoute component={ReceiptsListPage} />,
       },
       {
         path: 'receipts/:id',
-        element: <ReceiptDetailPage />,
+        element: <LazyRoute component={ReceiptDetailPage} />,
       },
       {
         path: 'team',
-        element: <EmployeesPage />,
+        element: <LazyRoute component={EmployeesPage} />,
       },
       {
         path: 'roles',
-        element: <RolesPage />,
+        element: <LazyRoute component={RolesPage} />,
       },
       {
         path: 'settings',
-        element: <OrganizationSettingsPage />,
+        element: <LazyRoute component={OrganizationSettingsPage} />,
       },
       {
         path: 'super-admin',
-        element: <SuperAdminDashboard />,
+        element: <LazyRoute component={SuperAdminDashboard} />,
       },
     ],
   },
@@ -130,3 +143,4 @@ export const router = createBrowserRouter([
     element: <Navigate to="/dashboard" replace />,
   },
 ]);
+

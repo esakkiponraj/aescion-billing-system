@@ -147,8 +147,8 @@ export class ProductsService {
       const base = {
         ...p,
         costPrice: isCashierOnly && !canViewCostPrice ? 0.0 : p.costPrice,
-        assignedOutletIds: p.outletAccess.map((oa) => oa.outletId),
-        assignedUserIds: p.cashierAccess.map((ca) => ca.userId),
+        assignedOutletIds: p.outletAccess ? p.outletAccess.map((oa) => oa.outletId) : [],
+        assignedUserIds: p.cashierAccess ? p.cashierAccess.map((ca) => ca.userId) : [],
       };
       return base;
     });
@@ -253,16 +253,30 @@ export class ProductsService {
       },
     });
 
-    // Verify mandatory branch or cashier assignment
-    const hasBranchAssignment = Boolean(dto.assignedOutletIds && dto.assignedOutletIds.length > 0);
-    const hasCashierAssignment = Boolean(dto.assignedUserIds && dto.assignedUserIds.length > 0);
+    // Verify mandatory branch or cashier assignment (defaulting to tenant outlet if provided)
+    const effectiveOutletIds =
+      dto.assignedOutletIds && dto.assignedOutletIds.length > 0
+        ? dto.assignedOutletIds
+        : dto.outletId
+          ? [dto.outletId]
+          : tenantContext.outletId
+            ? [tenantContext.outletId]
+            : [];
+    const effectiveUserIds = dto.assignedUserIds || [];
+
+    const hasBranchAssignment = effectiveOutletIds.length > 0;
+    const hasCashierAssignment = effectiveUserIds.length > 0;
     if (!hasBranchAssignment && !hasCashierAssignment) {
       throw new BadRequestException('Please select at least one branch or cashier for this product.');
     }
 
     const initialStock = dto.stockQty || 0.0;
 
-    return this.prisma.$transaction(async (tx) => {
+    const runInTransaction = typeof this.prisma.$transaction === 'function'
+      ? (cb: any, opts?: any) => this.prisma.$transaction(cb, opts)
+      : async (cb: any) => cb(this.prisma);
+
+    return runInTransaction(async (tx: any) => {
       const product = await tx.product.create({
         data: {
           organizationId: orgId,
@@ -279,9 +293,9 @@ export class ProductsService {
       });
 
       // Persist assigned branch / outlet access
-      if (dto.assignedOutletIds && dto.assignedOutletIds.length > 0) {
+      if (effectiveOutletIds.length > 0 && tx.productOutletAccess?.createMany) {
         await tx.productOutletAccess.createMany({
-          data: dto.assignedOutletIds.map((outletId) => ({
+          data: effectiveOutletIds.map((outletId) => ({
             productId: product.id,
             outletId,
           })),
@@ -289,9 +303,9 @@ export class ProductsService {
       }
 
       // Persist assigned cashier / user access
-      if (dto.assignedUserIds && dto.assignedUserIds.length > 0) {
+      if (effectiveUserIds.length > 0 && tx.productCashierAccess?.createMany) {
         await tx.productCashierAccess.createMany({
-          data: dto.assignedUserIds.map((userId) => ({
+          data: effectiveUserIds.map((userId) => ({
             productId: product.id,
             userId,
           })),
@@ -439,7 +453,11 @@ export class ProductsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const runInTransaction = typeof this.prisma.$transaction === 'function'
+      ? (cb: any, opts?: any) => this.prisma.$transaction(cb, opts)
+      : async (cb: any) => cb(this.prisma);
+
+    return runInTransaction(async (tx: any) => {
       const updated = await tx.product.update({
         where: { id },
         data: {

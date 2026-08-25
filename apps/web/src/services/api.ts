@@ -43,6 +43,8 @@ const processQueue = (error: any, token: string | null = null) => {
   failedQueue = [];
 };
 
+const inFlightGetRequests = new Map<string, Promise<any>>();
+
 export async function apiRequest<T = any>(
   endpoint: string,
   options: RequestInit = {},
@@ -58,32 +60,43 @@ export async function apiRequest<T = any>(
       ? `${baseUrl}${cleanEndpoint.slice(7)}`
       : `${baseUrl}${cleanEndpoint}`;
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
-  };
+  const isGet = (!options.method || options.method.toUpperCase() === 'GET') && !options.body;
+  const orgId = tenantStore.activeOrgId || '';
+  const outletId = tenantStore.activeOutletId || '';
+  const token = authStore.tokens?.accessToken || '';
+  const dedupeKey = isGet ? `${url}::${token}::${orgId}::${outletId}` : null;
 
-  if (authStore.tokens?.accessToken) {
-    headers['Authorization'] = `Bearer ${authStore.tokens.accessToken}`;
+  if (dedupeKey && inFlightGetRequests.has(dedupeKey)) {
+    return inFlightGetRequests.get(dedupeKey) as Promise<T>;
   }
 
-  if (tenantStore.activeOrgId) {
-    headers['X-Organization-Id'] = tenantStore.activeOrgId;
-  }
+  const executionPromise = (async (): Promise<T> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options.headers as Record<string, string>),
+    };
 
-  if (tenantStore.activeOutletId) {
-    headers['X-Outlet-Id'] = tenantStore.activeOutletId;
-  }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...options,
-      headers,
-    });
-  } catch (netErr: any) {
-    throw new ApiError('Unable to connect to the server. Please check your network connection.', 0);
-  }
+    if (orgId) {
+      headers['X-Organization-Id'] = orgId;
+    }
+
+    if (outletId) {
+      headers['X-Outlet-Id'] = outletId;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers,
+      });
+    } catch (netErr: any) {
+      throw new ApiError('Unable to connect to the server. Please check your network connection.', 0);
+    }
 
   if (response.status === 401 && authStore.tokens?.refreshToken && !endpoint.includes('/auth/')) {
     if (isRefreshing) {
@@ -159,9 +172,20 @@ export async function apiRequest<T = any>(
   }
 
   // If response is ApiResponse format
-  if (data && typeof data === 'object' && 'data' in data && 'success' in data) {
-    return data.data as T;
+    if (data && typeof data === 'object' && 'data' in data && 'success' in data) {
+      return data.data as T;
+    }
+
+    return data as T;
+  })();
+
+  if (dedupeKey) {
+    inFlightGetRequests.set(dedupeKey, executionPromise);
+    executionPromise.finally(() => {
+      inFlightGetRequests.delete(dedupeKey);
+    });
   }
 
-  return data as T;
+  return executionPromise;
 }
+

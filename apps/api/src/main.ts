@@ -2,10 +2,14 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { TimingInterceptor } from './common/interceptors/timing.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('AESCION_API');
   const app = await NestFactory.create(AppModule, { rawBody: true });
+
+  // Use timing interceptor for latency measurements
+  app.useGlobalInterceptors(new TimingInterceptor());
 
   const allowedOrigins = [
     'http://localhost:5173',

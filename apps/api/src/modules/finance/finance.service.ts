@@ -66,36 +66,7 @@ export class FinanceService {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
-    // 2. Fetch Today's Invoices for Live Today KPIs
-    const todayInvoices = await this.prisma.saleInvoice.findMany({
-      where: {
-        organizationId: orgId,
-        ...(outletId ? { outletId } : {}),
-        createdAt: { gte: startOfToday, lte: endOfToday },
-        paymentStatus: { not: 'CANCELLED' },
-      },
-      include: { items: true },
-    });
-
-    // Today Revenue: completed / paid sales for today (excluding unpaid/cancelled)
-    const todaySales = todayInvoices.reduce((acc, inv) => {
-      if (inv.paymentStatus === 'PAID') return acc + inv.totalAmount;
-      if (inv.paymentStatus === 'PARTIALLY_PAID') return acc + (inv.paidAmount || 0);
-      return acc;
-    }, 0);
-
-    const todaySalesCount = todayInvoices.length;
-
-    // Today COGS and Gross Profit
-    const todayCogs = todayInvoices.reduce((acc, inv) => {
-      const lineCogs = inv.items.reduce((iAcc, item) => iAcc + (item.quantity * (item.unitCost || 0)), 0);
-      return acc + lineCogs;
-    }, 0);
-
-    const todayGrossProfit = Math.max(0, todaySales - todayCogs);
-    const todayGrossMargin = todaySales > 0 ? Number(((todayGrossProfit / todaySales) * 100).toFixed(1)) : 0.0;
-
-    // 3. Filtered Date Range Invoices
+    // 2. Filtered Date Range Boundaries
     const dateFilter: any = {};
     if (query?.startDate || query?.endDate) {
       dateFilter.createdAt = {};
@@ -115,209 +86,376 @@ export class FinanceService {
     if (outletId) whereExpenses.outletId = outletId;
     if (dateFilter.createdAt) whereExpenses.expenseDate = dateFilter.createdAt;
 
+    const whereTodaySales: any = {
+      organizationId: orgId,
+      ...(outletId ? { outletId } : {}),
+      createdAt: { gte: startOfToday, lte: endOfToday },
+      paymentStatus: { not: 'CANCELLED' },
+    };
+
+    // 3. Parallel high-speed database queries using native SQL / Prisma aggregates
     const [
-      salesInvoices,
+      todaySalesAgg,
+      todayPaidAgg,
+      todayPartiallyPaidAgg,
+      todayItems,
+      periodItems,
+      salesAgg,
+      purchasesAgg,
+      expensesAgg,
       allOutlets,
       lowStockProducts,
       recentInvoices,
-      allOrgInvoices,
-      activeSessions,
-      purchaseBills,
-      expenses,
+      allOrgReceivablesAgg,
+      supplierPayablesAgg,
+      activeSessionsCount,
+      invoiceStatusGroups,
+      quotationStatusGroups,
+      todayQuotationsCount,
+      receiptMethodGroups,
+      todayReceiptMethodGroups,
+      branchSalesGroups,
+      topItemGroups,
+      cashierSalesGroup,
+      cashierReceiptsGroup,
+      todayCashierReceiptsGroup,
+      cashierQuotationsGroup,
+      orgMemberships,
     ] = await Promise.all([
-      this.prisma.saleInvoice.findMany({
-        where: whereSales,
-        include: { items: true, customer: true, outlet: true },
-        orderBy: { createdAt: 'desc' },
+      // 1. Today Sales Count
+      this.prisma.saleInvoice.aggregate({
+        where: whereTodaySales,
+        _count: true,
       }),
+      // 2. Today Paid sum
+      this.prisma.saleInvoice.aggregate({
+        where: { ...whereTodaySales, paymentStatus: 'PAID' },
+        _sum: { totalAmount: true },
+      }),
+      // 3. Today Partially Paid sum
+      this.prisma.saleInvoice.aggregate({
+        where: { ...whereTodaySales, paymentStatus: 'PARTIALLY_PAID' },
+        _sum: { paidAmount: true },
+      }),
+      // 4. Today Items for COGS (shallow select)
+      this.prisma.saleInvoiceItem.findMany({
+        where: { invoice: whereTodaySales },
+        select: { quantity: true, unitCost: true },
+      }),
+      // 5. Selected Period Items for COGS
+      this.prisma.saleInvoiceItem.findMany({
+        where: { invoice: whereSales },
+        select: { quantity: true, unitCost: true },
+      }),
+      // 6. Selected Period Sales Aggregates
+      this.prisma.saleInvoice.aggregate({
+        where: whereSales,
+        _sum: {
+          totalAmount: true,
+          cgstAmount: true,
+          sgstAmount: true,
+          igstAmount: true,
+        },
+        _count: true,
+      }),
+      // 7. Selected Period Purchases Aggregates
+      this.prisma.purchaseBill.aggregate({
+        where: wherePurchases,
+        _sum: {
+          totalAmount: true,
+          cgstAmount: true,
+          sgstAmount: true,
+          igstAmount: true,
+        },
+      }),
+      // 8. Selected Period Expenses
+      this.prisma.expense.aggregate({
+        where: whereExpenses,
+        _sum: { amount: true },
+      }),
+      // 9. Outlets list
       this.prisma.outlet.findMany({
         where: { organizationId: orgId, isActive: true },
+        select: { id: true, name: true, code: true },
       }),
+      // 10. Low stock products (take 10)
       this.prisma.product.findMany({
         where: { organizationId: orgId, stockQty: { lte: 15 } },
+        select: { id: true, name: true, sku: true, category: true, stockQty: true, sellingPrice: true },
         orderBy: { stockQty: 'asc' },
         take: 10,
       }),
+      // 11. Recent invoices (take 10, shallow)
       this.prisma.saleInvoice.findMany({
         where: { organizationId: orgId, ...(outletId ? { outletId } : {}), paymentStatus: { not: 'CANCELLED' } },
-        include: { customer: true, outlet: true },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          totalAmount: true,
+          paidAmount: true,
+          outstandingAmount: true,
+          paymentStatus: true,
+          isPosSale: true,
+          createdAt: true,
+          createdByUserId: true,
+          customer: { select: { name: true } },
+          outlet: { select: { name: true } },
+        },
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
-      this.prisma.saleInvoice.findMany({
-        where: { organizationId: orgId, ...(outletId ? { outletId } : {}), paymentStatus: { not: 'CANCELLED' } },
-        select: { id: true, outstandingAmount: true, paymentStatus: true, totalAmount: true, paidAmount: true, dueDate: true },
+      // 12. Customer receivables across org
+      this.prisma.saleInvoice.aggregate({
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          paymentStatus: { not: 'CANCELLED' },
+          outstandingAmount: { gt: 0 },
+        },
+        _sum: { outstandingAmount: true },
       }),
-      this.prisma.registerSession.findMany({
+      // 13. Supplier payables across org
+      this.prisma.purchaseBill.aggregate({
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          outstandingAmount: { gt: 0 },
+        },
+        _sum: { outstandingAmount: true },
+      }),
+      // 14. Active dining tables / sessions
+      this.prisma.registerSession.count({
         where: { organizationId: orgId, ...(outletId ? { outletId } : {}), status: 'OPEN' },
       }),
-      this.prisma.purchaseBill.findMany({
-        where: wherePurchases,
-        include: { items: true, supplier: true },
+      // 15. Invoice status groups
+      this.prisma.saleInvoice.groupBy({
+        by: ['paymentStatus'],
+        where: { organizationId: orgId, ...(outletId ? { outletId } : {}), paymentStatus: { not: 'CANCELLED' } },
+        _count: true,
+        _sum: { totalAmount: true, outstandingAmount: true },
       }),
-      this.prisma.expense.findMany({
-        where: whereExpenses,
+      // 16. Quotation status groups
+      this.prisma.quotation.groupBy({
+        by: ['status'],
+        where: { organizationId: orgId, ...(outletId ? { outletId } : {}) },
+        _count: true,
+        _sum: { totalAmount: true },
+      }),
+      // 17. Today quotations count
+      this.prisma.quotation.count({
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          quotationDate: { gte: startOfToday, lte: endOfToday },
+        },
+      }),
+      // 18. Receipt method groups (All valid)
+      this.prisma.receipt.groupBy({
+        by: ['paymentMethod'],
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          status: { not: 'VOIDED' },
+        },
+        _sum: { amountPaid: true },
+        _count: true,
+      }),
+      // 19. Today Receipt method groups
+      this.prisma.receipt.groupBy({
+        by: ['paymentMethod'],
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          status: { not: 'VOIDED' },
+          paymentDate: { gte: startOfToday, lte: endOfToday },
+        },
+        _sum: { amountPaid: true },
+        _count: true,
+      }),
+      // 20. Branch sales grouped
+      this.prisma.saleInvoice.groupBy({
+        by: ['outletId'],
+        where: whereSales,
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+      // 21. Top selling product items (take 5)
+      this.prisma.saleInvoiceItem.groupBy({
+        by: ['productId', 'description'],
+        where: { invoice: whereSales },
+        _sum: { quantity: true, totalAmount: true },
+        orderBy: { _sum: { totalAmount: 'desc' } },
+        take: 5,
+      }),
+      // 22. Cashier sales grouped
+      this.prisma.saleInvoice.groupBy({
+        by: ['createdByUserId'],
+        where: whereSales,
+        _sum: { totalAmount: true },
+        _count: true,
+      }),
+      // 23. Cashier receipts grouped
+      this.prisma.receipt.groupBy({
+        by: ['createdByUserId'],
+        where: { organizationId: orgId, ...(outletId ? { outletId } : {}), status: { not: 'VOIDED' } },
+        _sum: { amountPaid: true },
+        _count: true,
+      }),
+      // 24. Today Cashier receipts grouped
+      this.prisma.receipt.groupBy({
+        by: ['createdByUserId'],
+        where: {
+          organizationId: orgId,
+          ...(outletId ? { outletId } : {}),
+          status: { not: 'VOIDED' },
+          paymentDate: { gte: startOfToday, lte: endOfToday },
+        },
+        _sum: { amountPaid: true },
+        _count: true,
+      }),
+      // 25. Cashier quotations grouped
+      this.prisma.quotation.groupBy({
+        by: ['createdByUserId', 'status'],
+        where: { organizationId: orgId, ...(outletId ? { outletId } : {}) },
+        _count: true,
+      }),
+      // 26. Org memberships for cashiers
+      this.prisma.organizationMembership.findMany({
+        where: { organizationId: orgId },
+        select: {
+          userId: true,
+          status: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              isActive: true,
+              lastSeenAt: true,
+            },
+          },
+          membershipRoles: {
+            select: { role: { select: { code: true, name: true } } },
+          },
+          outletMemberships: {
+            select: {
+              outletId: true,
+              membershipRoles: {
+                select: { role: { select: { code: true, name: true } } },
+              },
+            },
+          },
+        },
       }),
     ]);
 
-    // 4. Calculations for Selected Period
-    const totalSales = salesInvoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
-    const totalPurchases = purchaseBills.reduce((acc, b) => acc + b.totalAmount, 0);
-    const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+    // Calculations
+    const cogs = periodItems.reduce((acc, it) => acc + (it.quantity * (it.unitCost || 0)), 0);
+    const todaySales = (todayPaidAgg._sum.totalAmount || 0) + (todayPartiallyPaidAgg._sum.paidAmount || 0);
+    const todaySalesCount = todaySalesAgg._count || 0;
+    const todayCogs = todayItems.reduce((acc, it) => acc + (it.quantity * (it.unitCost || 0)), 0);
+    const todayGrossProfit = Math.max(0, todaySales - todayCogs);
+    const todayGrossMargin = todaySales > 0 ? Number(((todayGrossProfit / todaySales) * 100).toFixed(1)) : 0.0;
 
-    const cogs = salesInvoices.reduce((acc, inv) => {
-      const invCogs = inv.items.reduce((iAcc, item) => iAcc + (item.quantity * (item.unitCost || 0)), 0);
-      return acc + invCogs;
-    }, 0);
-
+    const totalSales = salesAgg._sum.totalAmount || 0;
+    const totalPurchases = purchasesAgg._sum.totalAmount || 0;
+    const totalExpenses = expensesAgg._sum.amount || 0;
     const grossProfit = Math.max(0, totalSales - cogs);
     const grossMargin = totalSales > 0 ? Number(((grossProfit / totalSales) * 100).toFixed(1)) : 0.0;
     const netProfit = grossProfit - totalExpenses;
 
-    // GST Breakdown
-    const cgstOutput = salesInvoices.reduce((acc, inv) => acc + inv.cgstAmount, 0);
-    const sgstOutput = salesInvoices.reduce((acc, inv) => acc + inv.sgstAmount, 0);
-    const igstOutput = salesInvoices.reduce((acc, inv) => acc + inv.igstAmount, 0);
+    const cgstOutput = salesAgg._sum.cgstAmount || 0;
+    const sgstOutput = salesAgg._sum.sgstAmount || 0;
+    const igstOutput = salesAgg._sum.igstAmount || 0;
     const outputGst = cgstOutput + sgstOutput + igstOutput;
 
-    const cgstInput = purchaseBills.reduce((acc, b) => acc + b.cgstAmount, 0);
-    const sgstInput = purchaseBills.reduce((acc, b) => acc + b.sgstAmount, 0);
-    const igstInput = purchaseBills.reduce((acc, b) => acc + b.igstAmount, 0);
+    const cgstInput = purchasesAgg._sum.cgstAmount || 0;
+    const sgstInput = purchasesAgg._sum.sgstAmount || 0;
+    const igstInput = purchasesAgg._sum.igstAmount || 0;
     const inputGst = cgstInput + sgstInput + igstInput;
-
     const netGstPayable = outputGst - inputGst;
 
-    // Receivables & Payables across organization
-    const customerReceivables = allOrgInvoices
-      .filter((inv) => inv.outstandingAmount > 0)
-      .reduce((acc, inv) => acc + (inv.outstandingAmount || Math.max(0, inv.totalAmount - inv.paidAmount)), 0);
+    const customerReceivables = allOrgReceivablesAgg._sum.outstandingAmount || 0;
+    const supplierPayables = supplierPayablesAgg._sum.outstandingAmount || 0;
+    const activeDiningTables = activeSessionsCount;
 
-    const supplierPayables = purchaseBills
-      .filter((b) => b.outstandingAmount > 0)
-      .reduce((acc, b) => acc + b.outstandingAmount, 0);
-
-    // Active Dining Tables
-    const activeDiningTables = activeSessions.length;
-
-    // Invoice Status Breakdown
-    const now = new Date();
+    // Invoice status breakdown
     let paidInvoices = 0;
     let partiallyPaidInvoices = 0;
     let unpaidInvoices = 0;
-    let overdueInvoices = 0;
+    let totalInvoices = 0;
+    let totalInvoiced = 0;
+    let totalOutstanding = 0;
 
-    for (const inv of allOrgInvoices) {
-      if (inv.paymentStatus === 'PAID') paidInvoices++;
-      else if (inv.paymentStatus === 'PARTIALLY_PAID') partiallyPaidInvoices++;
-      else if (inv.paymentStatus === 'UNPAID') unpaidInvoices++;
+    for (const g of invoiceStatusGroups) {
+      const count = g._count || 0;
+      totalInvoices += count;
+      totalInvoiced += g._sum.totalAmount || 0;
+      totalOutstanding += g._sum.outstandingAmount || 0;
 
-      if (inv.outstandingAmount > 0 && inv.dueDate && new Date(inv.dueDate) < now) {
-        overdueInvoices++;
-      }
+      if (g.paymentStatus === 'PAID') paidInvoices += count;
+      else if (g.paymentStatus === 'PARTIALLY_PAID') partiallyPaidInvoices += count;
+      else if (g.paymentStatus === 'UNPAID') unpaidInvoices += count;
     }
 
-    // 5. Sales by Branch Breakdown
+    const now = new Date();
+    const overdueInvoices = await this.prisma.saleInvoice.count({
+      where: {
+        organizationId: orgId,
+        ...(outletId ? { outletId } : {}),
+        paymentStatus: { not: 'CANCELLED' },
+        outstandingAmount: { gt: 0 },
+        dueDate: { lt: now },
+      },
+    });
+
+    // Sales by Branch
+    const branchMap = new Map<string, { totalSales: number; invoiceCount: number }>();
+    for (const b of branchSalesGroups) {
+      branchMap.set(b.outletId, {
+        totalSales: b._sum.totalAmount || 0,
+        invoiceCount: b._count || 0,
+      });
+    }
+
     const salesByBranch = allOutlets.map((outlet) => {
-      const branchInvoices = salesInvoices.filter((inv) => inv.outletId === outlet.id);
-      const branchSales = branchInvoices.reduce((acc, inv) => acc + inv.totalAmount, 0);
+      const data = branchMap.get(outlet.id) || { totalSales: 0, invoiceCount: 0 };
       return {
         outletId: outlet.id,
         outletName: outlet.name,
         outletCode: outlet.code,
-        totalSales: branchSales,
-        invoiceCount: branchInvoices.length,
+        totalSales: data.totalSales,
+        invoiceCount: data.invoiceCount,
       };
     });
 
-    // 6. Top Selling Products
-    const productStatsMap = new Map<
-      string,
-      {
-        productId?: string;
-        productName: string;
-        name: string;
-        quantity: number;
-        totalQuantity: number;
-        revenue: number;
-        totalRevenue: number;
-      }
-    >();
-    for (const inv of salesInvoices) {
-      for (const item of inv.items) {
-        const key = item.productId || item.description;
-        const current = productStatsMap.get(key) || {
-          productId: item.productId || undefined,
-          productName: item.description,
-          name: item.description,
-          quantity: 0,
-          totalQuantity: 0,
-          revenue: 0,
-          totalRevenue: 0,
-        };
-        current.quantity += item.quantity;
-        current.totalQuantity += item.quantity;
-        current.revenue += item.totalAmount;
-        current.totalRevenue += item.totalAmount;
-        productStatsMap.set(key, current);
-      }
+    // Top Selling Products
+    const topSellingProducts = topItemGroups.map((g) => ({
+      productId: g.productId || undefined,
+      productName: g.description,
+      name: g.description,
+      quantity: g._sum.quantity || 0,
+      totalQuantity: g._sum.quantity || 0,
+      revenue: g._sum.totalAmount || 0,
+      totalRevenue: g._sum.totalAmount || 0,
+    }));
+
+    // Quotations Aggregates
+    let totalQuotations = 0;
+    let acceptedQuotations = 0;
+    let pendingQuotations = 0;
+    let convertedQuotations = 0;
+
+    for (const qg of quotationStatusGroups) {
+      const count = qg._count || 0;
+      totalQuotations += count;
+      if (qg.status === 'ACCEPTED') acceptedQuotations += count;
+      else if (qg.status === 'DRAFT' || qg.status === 'SENT') pendingQuotations += count;
+      else if (qg.status === 'CONVERTED') convertedQuotations += count;
     }
 
-    const topSellingProducts = Array.from(productStatsMap.values())
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 5);
-
-    // 7. Quotations & Receipts Aggregates
-    const allOrgQuotations = await this.prisma.quotation.findMany({
-      where: {
-        organizationId: orgId,
-        ...(outletId ? { outletId } : {}),
-      },
-      select: {
-        id: true,
-        status: true,
-        totalAmount: true,
-        quotationDate: true,
-        createdByUserId: true,
-        createdAt: true,
-      },
-    });
-
-    const totalQuotations = allOrgQuotations.length;
-    const todayQuotations = allOrgQuotations.filter(
-      (q) => q.quotationDate >= startOfToday && q.quotationDate <= endOfToday,
-    ).length;
-    const acceptedQuotations = allOrgQuotations.filter((q) => q.status === 'ACCEPTED').length;
-    const pendingQuotations = allOrgQuotations.filter(
-      (q) => q.status === 'DRAFT' || q.status === 'SENT',
-    ).length;
-    const convertedQuotations = allOrgQuotations.filter((q) => q.status === 'CONVERTED').length;
-
-    const allOrgReceipts = await this.prisma.receipt.findMany({
-      where: {
-        organizationId: orgId,
-        ...(outletId ? { outletId } : {}),
-      },
-      select: {
-        id: true,
-        amountPaid: true,
-        paymentMethod: true,
-        status: true,
-        paymentDate: true,
-        createdByUserId: true,
-        createdAt: true,
-      },
-    });
-
-    const validReceipts = allOrgReceipts.filter((r) => r.status !== 'VOIDED');
-    const totalReceipts = validReceipts.length;
-    const todayReceipts = validReceipts.filter(
-      (r) => r.paymentDate >= startOfToday && r.paymentDate <= endOfToday,
-    ).length;
-    const totalCollected = validReceipts.reduce((acc, r) => acc + r.amountPaid, 0);
-    const todayCollected = validReceipts
-      .filter((r) => r.paymentDate >= startOfToday && r.paymentDate <= endOfToday)
-      .reduce((acc, r) => acc + r.amountPaid, 0);
-
+    // Collections by Method
     const collectionsByMethod: Record<string, number> = {
       CASH: 0,
       UPI: 0,
@@ -328,6 +466,22 @@ export class FinanceService {
       OTHER: 0,
     };
 
+    let totalReceipts = 0;
+    let totalCollected = 0;
+
+    for (const rg of receiptMethodGroups) {
+      const pm = rg.paymentMethod || 'OTHER';
+      const amount = rg._sum.amountPaid || 0;
+      totalReceipts += rg._count || 0;
+      totalCollected += amount;
+
+      if (collectionsByMethod[pm] !== undefined) {
+        collectionsByMethod[pm] += amount;
+      } else {
+        collectionsByMethod.OTHER += amount;
+      }
+    }
+
     const todayCollectionsByMethod: Record<string, number> = {
       CASH: 0,
       UPI: 0,
@@ -337,113 +491,64 @@ export class FinanceService {
       OTHER: 0,
     };
 
-    for (const r of validReceipts) {
-      const pm = r.paymentMethod || 'OTHER';
-      if (collectionsByMethod[pm] !== undefined) {
-        collectionsByMethod[pm] += r.amountPaid;
-      } else {
-        collectionsByMethod.OTHER += r.amountPaid;
-      }
+    let todayReceipts = 0;
+    let todayCollected = 0;
 
-      if (r.paymentDate >= startOfToday && r.paymentDate <= endOfToday) {
-        if (todayCollectionsByMethod[pm] !== undefined) {
-          todayCollectionsByMethod[pm] += r.amountPaid;
-        } else {
-          todayCollectionsByMethod.OTHER += r.amountPaid;
-        }
+    for (const trg of todayReceiptMethodGroups) {
+      const pm = trg.paymentMethod || 'OTHER';
+      const amount = trg._sum.amountPaid || 0;
+      todayReceipts += trg._count || 0;
+      todayCollected += amount;
+
+      if (todayCollectionsByMethod[pm] !== undefined) {
+        todayCollectionsByMethod[pm] += amount;
+      } else {
+        todayCollectionsByMethod.OTHER += amount;
       }
     }
 
-    const nonCancelledInvoices = allOrgInvoices.filter((i) => i.paymentStatus !== 'CANCELLED');
-    const totalInvoiced = nonCancelledInvoices.reduce((acc, i) => acc + i.totalAmount, 0);
-    const totalOutstanding = nonCancelledInvoices.reduce((acc, i) => acc + i.outstandingAmount, 0);
-    const todayInvoicesCount = todayInvoices.length;
-
-    // 8. Cashier-wise Performance Breakdown
-    const cashierUserIds = Array.from(
-      new Set([
-        ...salesInvoices.map((inv) => inv.createdByUserId).filter(Boolean),
-        ...allOrgQuotations.map((q) => q.createdByUserId).filter(Boolean),
-        ...allOrgReceipts.map((r) => r.createdByUserId).filter(Boolean),
-      ]),
-    ) as string[];
-
-    const orgMemberships = await this.prisma.organizationMembership.findMany({
-      where: { organizationId: orgId },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            isActive: true,
-            lastSeenAt: true,
-          },
-        },
-        membershipRoles: {
-          include: { role: true },
-        },
-        outletMemberships: {
-          include: {
-            membershipRoles: {
-              include: { role: true },
-            },
-          },
-        },
-      },
-    });
-
-    const cashierUsersMap = new Map<
-      string,
-      {
-        name: string;
-        status: 'ACTIVE' | 'INACTIVE';
-        isActive: boolean;
-        isOnline: boolean;
-        lastSeenAt: string | null;
+    // Cashier performance maps
+    const cashierSalesMap = new Map<string, { totalSales: number; invoiceCount: number }>();
+    for (const cs of cashierSalesGroup) {
+      if (cs.createdByUserId) {
+        cashierSalesMap.set(cs.createdByUserId, {
+          totalSales: cs._sum.totalAmount || 0,
+          invoiceCount: cs._count || 0,
+        });
       }
-    >();
+    }
 
-    const cashierStatsMap = new Map<
-      string,
-      {
-        cashierId: string;
-        cashierName: string;
-        totalSales: number;
-        invoiceCount: number;
-        quotationsCreated: number;
-        acceptedQuotations: number;
-        invoicesCreated: number;
-        receiptsGenerated: number;
-        totalCollected: number;
-        todayCollected: number;
-        lastActivity: string | null;
-        status: 'ACTIVE' | 'INACTIVE';
-        isActive: boolean;
-        isOnline: boolean;
-        lastSeenAt: string | null;
+    const cashierReceiptsMap = new Map<string, { totalCollected: number; receiptsGenerated: number }>();
+    for (const cr of cashierReceiptsGroup) {
+      if (cr.createdByUserId) {
+        cashierReceiptsMap.set(cr.createdByUserId, {
+          totalCollected: cr._sum.amountPaid || 0,
+          receiptsGenerated: cr._count || 0,
+        });
       }
-    >();
+    }
+
+    const todayCashierReceiptsMap = new Map<string, number>();
+    for (const tcr of todayCashierReceiptsGroup) {
+      if (tcr.createdByUserId) {
+        todayCashierReceiptsMap.set(tcr.createdByUserId, tcr._sum.amountPaid || 0);
+      }
+    }
+
+    const cashierQuotationsMap = new Map<string, { created: number; accepted: number }>();
+    for (const cq of cashierQuotationsGroup) {
+      if (cq.createdByUserId) {
+        const cur = cashierQuotationsMap.get(cq.createdByUserId) || { created: 0, accepted: 0 };
+        cur.created += cq._count || 0;
+        if (cq.status === 'ACCEPTED') cur.accepted += cq._count || 0;
+        cashierQuotationsMap.set(cq.createdByUserId, cur);
+      }
+    }
+
+    const cashierUsersMap = new Map<string, any>();
+    const cashierStatsList: any[] = [];
 
     for (const m of orgMemberships) {
-      const isActivityUser = cashierUserIds.includes(m.userId);
-      const isCashierRole =
-        m.membershipRoles.some(
-          (mr) =>
-            mr.role?.code === 'CASHIER' ||
-            mr.role?.name?.toLowerCase().includes('cashier'),
-        ) ||
-        m.outletMemberships.some((om) =>
-          om.membershipRoles.some(
-            (mr) =>
-              mr.role?.code === 'CASHIER' ||
-              mr.role?.name?.toLowerCase().includes('cashier'),
-          ),
-        );
-
-      const isStaffCashier = isCashierRole || isActivityUser;
-
       const userName = `${m.user.firstName || ''} ${m.user.lastName || ''}`.trim() || m.user.email || 'Cashier';
       const isAccountEnabled = (m.status === 'ACTIVE' || m.status === 'Active') && m.user.isActive !== false;
       const isLiveOnline = isAccountEnabled && this.presenceService.isCashierOnline(m.userId, m.user);
@@ -458,24 +563,36 @@ export class FinanceService {
         lastSeenAt: lastSeenAtStr,
       });
 
-      if (isStaffCashier) {
+      const isCashierRole =
+        m.membershipRoles.some((mr) => mr.role?.code === 'CASHIER' || mr.role?.name?.toLowerCase().includes('cashier')) ||
+        m.outletMemberships.some((om) => om.membershipRoles.some((mr) => mr.role?.code === 'CASHIER' || mr.role?.name?.toLowerCase().includes('cashier')));
+
+      const salesData = cashierSalesMap.get(m.userId) || { totalSales: 0, invoiceCount: 0 };
+      const receiptsData = cashierReceiptsMap.get(m.userId) || { totalCollected: 0, receiptsGenerated: 0 };
+      const todayColl = todayCashierReceiptsMap.get(m.userId) || 0;
+      const qData = cashierQuotationsMap.get(m.userId) || { created: 0, accepted: 0 };
+
+      const hasActivity = salesData.invoiceCount > 0 || receiptsData.receiptsGenerated > 0 || qData.created > 0;
+
+      if (isCashierRole || hasActivity) {
         const isAssignedToOutlet =
           !outletId ||
           m.outletMemberships.length === 0 ||
           m.outletMemberships.some((om) => om.outletId === outletId) ||
-          isActivityUser;
+          hasActivity;
+
         if (isAssignedToOutlet) {
-          cashierStatsMap.set(m.userId, {
+          cashierStatsList.push({
             cashierId: m.userId,
             cashierName: userName,
-            totalSales: 0,
-            invoiceCount: 0,
-            quotationsCreated: 0,
-            acceptedQuotations: 0,
-            invoicesCreated: 0,
-            receiptsGenerated: 0,
-            totalCollected: 0,
-            todayCollected: 0,
+            totalSales: salesData.totalSales,
+            invoiceCount: salesData.invoiceCount,
+            quotationsCreated: qData.created,
+            acceptedQuotations: qData.accepted,
+            invoicesCreated: salesData.invoiceCount,
+            receiptsGenerated: receiptsData.receiptsGenerated,
+            totalCollected: receiptsData.totalCollected,
+            todayCollected: todayColl,
             lastActivity: lastSeenAtStr,
             status,
             isActive: isLiveOnline,
@@ -486,57 +603,9 @@ export class FinanceService {
       }
     }
 
-    for (const inv of salesInvoices) {
-      const cId = inv.createdByUserId;
-      if (!cId) continue;
-      const current = cashierStatsMap.get(cId);
-      if (current) {
-        current.totalSales += inv.totalAmount;
-        current.invoiceCount += 1;
-        current.invoicesCreated += 1;
-        const invDate = inv.createdAt.toISOString();
-        if (!current.lastActivity || invDate > current.lastActivity) {
-          current.lastActivity = invDate;
-        }
-      }
-    }
+    const cashierPerformance = cashierStatsList.sort((a, b) => b.totalSales - a.totalSales);
 
-    for (const q of allOrgQuotations) {
-      const cId = q.createdByUserId;
-      if (!cId) continue;
-      const current = cashierStatsMap.get(cId);
-      if (current) {
-        current.quotationsCreated += 1;
-        if (q.status === 'ACCEPTED') current.acceptedQuotations += 1;
-        const qDate = q.createdAt.toISOString();
-        if (!current.lastActivity || qDate > current.lastActivity) {
-          current.lastActivity = qDate;
-        }
-      }
-    }
-
-    for (const r of validReceipts) {
-      const cId = r.createdByUserId;
-      if (!cId) continue;
-      const current = cashierStatsMap.get(cId);
-      if (current) {
-        current.receiptsGenerated += 1;
-        current.totalCollected += r.amountPaid;
-        if (r.paymentDate >= startOfToday && r.paymentDate <= endOfToday) {
-          current.todayCollected += r.amountPaid;
-        }
-        const rDate = r.createdAt.toISOString();
-        if (!current.lastActivity || rDate > current.lastActivity) {
-          current.lastActivity = rDate;
-        }
-      }
-    }
-
-    const cashierPerformance = Array.from(cashierStatsMap.values()).sort(
-      (a, b) => b.totalSales - a.totalSales,
-    );
-
-    // 9. Recent Sales Formatted
+    // Recent sales formatted
     const recentSalesFormatted = recentInvoices.map((inv) => ({
       id: inv.id,
       invoiceNumber: inv.invoiceNumber,
@@ -568,8 +637,8 @@ export class FinanceService {
       customerReceivables,
       supplierPayables,
       activeDiningTables,
-      totalInvoices: allOrgInvoices.length,
-      todayInvoices: todayInvoicesCount,
+      totalInvoices,
+      todayInvoices: todaySalesCount,
       paidInvoices,
       partiallyPaidInvoices,
       unpaidInvoices,
@@ -583,7 +652,7 @@ export class FinanceService {
       todayRazorpayCollected: todayCollectionsByMethod.RAZORPAY || 0,
       totalRazorpayCollected: collectionsByMethod.RAZORPAY || 0,
       totalQuotations,
-      todayQuotations,
+      todayQuotations: todayQuotationsCount,
       acceptedQuotations,
       pendingQuotations,
       convertedQuotations,
