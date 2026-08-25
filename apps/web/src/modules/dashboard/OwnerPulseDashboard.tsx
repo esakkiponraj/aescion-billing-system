@@ -24,6 +24,7 @@ import {
   Store,
   RefreshCw,
   Award,
+  Globe,
 } from 'lucide-react';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
@@ -32,7 +33,11 @@ import { useTenantStore } from '../../stores/tenantStore';
 import { useAuthStore } from '../../stores/authStore';
 import { apiRequest } from '../../services/api';
 import { getBusinessTypeCapability } from '@aescion/types';
-import { subscribeToCashierPresence, onSocketConnect } from '../../services/socket';
+import {
+  subscribeToCashierPresence,
+  subscribeToEvent,
+  onSocketConnect,
+} from '../../services/socket';
 
 type DateFilterPreset = 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
 
@@ -141,9 +146,21 @@ export const OwnerPulseDashboard: React.FC = () => {
       fetchDashboardData(true);
     });
 
+    const unsubscribeReceipt = subscribeToEvent('receipt:generated', (data) => {
+      console.log('[Owner Dashboard] Live receipt generated event:', data);
+      fetchDashboardData(true);
+    });
+
+    const unsubscribeInvoice = subscribeToEvent('invoice:updated', (data) => {
+      console.log('[Owner Dashboard] Live invoice updated event:', data);
+      fetchDashboardData(true);
+    });
+
     return () => {
       unsubscribePresence();
       unsubscribeConnect();
+      unsubscribeReceipt();
+      unsubscribeInvoice();
     };
   }, [fetchDashboardData]);
 
@@ -376,6 +393,79 @@ export const OwnerPulseDashboard: React.FC = () => {
           <p className="text-[11px] text-slate-500 leading-snug truncate">
             Outstanding balance across invoices
           </p>
+        </div>
+      </div>
+
+      {/* Live Payment Method Collections Breakdown */}
+      <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-2xs space-y-3 w-full">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-800">
+              Live Collections Breakdown ({dateFilter === 'TODAY' ? 'Today' : 'Filtered Period'})
+            </span>
+          </div>
+          <span className="text-xs font-bold text-emerald-700 font-mono">
+            Total Collected: ₹{(dateFilter === 'TODAY' ? summary?.todayCollected ?? 0 : summary?.totalCollected ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+          {/* Razorpay Online */}
+          <div className="p-3 rounded-lg bg-blue-50/80 border border-blue-100 space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-bold text-blue-800">
+              <span>Razorpay / Online</span>
+              <Globe className="w-3.5 h-3.5 text-blue-600" />
+            </div>
+            <p className="text-base sm:text-lg font-black text-blue-900 font-mono">
+              ₹{(dateFilter === 'TODAY'
+                ? summary?.todayRazorpayCollected ?? 0
+                : summary?.totalRazorpayCollected ?? 0
+              ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+
+          {/* Cash */}
+          <div className="p-3 rounded-lg bg-emerald-50/80 border border-emerald-100 space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-bold text-emerald-800">
+              <span>Cash</span>
+              <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+            </div>
+            <p className="text-base sm:text-lg font-black text-emerald-900 font-mono">
+              ₹{(dateFilter === 'TODAY'
+                ? summary?.todayCollectionsByMethod?.CASH ?? 0
+                : summary?.collectionsByMethod?.CASH ?? 0
+              ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+
+          {/* UPI */}
+          <div className="p-3 rounded-lg bg-purple-50/80 border border-purple-100 space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-bold text-purple-800">
+              <span>UPI / QR</span>
+              <Zap className="w-3.5 h-3.5 text-purple-600" />
+            </div>
+            <p className="text-base sm:text-lg font-black text-purple-900 font-mono">
+              ₹{(dateFilter === 'TODAY'
+                ? summary?.todayCollectionsByMethod?.UPI ?? 0
+                : summary?.collectionsByMethod?.UPI ?? 0
+              ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+
+          {/* Card / Bank */}
+          <div className="p-3 rounded-lg bg-amber-50/80 border border-amber-100 space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-bold text-amber-800">
+              <span>Card & Other</span>
+              <TrendingUp className="w-3.5 h-3.5 text-amber-600" />
+            </div>
+            <p className="text-base sm:text-lg font-black text-amber-900 font-mono">
+              ₹{(dateFilter === 'TODAY'
+                ? (summary?.todayCollectionsByMethod?.CARD ?? 0) + (summary?.todayCollectionsByMethod?.BANK_TRANSFER ?? 0)
+                : (summary?.collectionsByMethod?.CARD ?? 0) + (summary?.collectionsByMethod?.BANK_TRANSFER ?? 0)
+              ).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
         </div>
       </div>
 

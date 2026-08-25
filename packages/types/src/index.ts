@@ -672,4 +672,76 @@ export interface CashierPresenceEvent {
   lastSeenAt: string;
 }
 
+export interface CreateRazorpayOrderRequest {
+  invoiceId: string;
+  amount?: number;
+  notes?: Record<string, string>;
+}
+
+export interface RazorpayOrderResponse {
+  orderId: string;
+  amount: number;
+  amountInPaise: number;
+  currency: string;
+  keyId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  businessName: string;
+  businessLogo?: string;
+}
+
+export interface VerifyRazorpayPaymentRequest {
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature: string;
+  notes?: string;
+}
+
+export interface VerifyRazorpayPaymentResponse {
+  success: boolean;
+  paymentId: string;
+  receiptId: string;
+  receiptNumber: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  paidAmount: number;
+  outstandingAmount: number;
+  paymentStatus: string;
+}
+
+export interface CreatePaymentRefundRequest {
+  paymentAttemptId?: string;
+  paymentId?: string;
+  amount?: number;
+  reason?: string;
+}
+
+export interface PaymentRefundResponse {
+  success: boolean;
+  refundId: string;
+  razorpayRefundId: string;
+  amount: number;
+  invoiceId: string;
+  invoiceNumber: string;
+  newPaidAmount: number;
+  newOutstandingAmount: number;
+  paymentStatus: string;
+}
+
+export interface ReconcilePaymentAttemptResponse {
+  success: boolean;
+  status: string;
+  message: string;
+  paymentAttemptId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  paidAmount: number;
+  outstandingAmount: number;
+}
+
+
+
 

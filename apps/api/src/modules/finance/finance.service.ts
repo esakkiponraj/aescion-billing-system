@@ -300,6 +300,7 @@ export class FinanceService {
       select: {
         id: true,
         amountPaid: true,
+        paymentMethod: true,
         status: true,
         paymentDate: true,
         createdByUserId: true,
@@ -316,6 +317,42 @@ export class FinanceService {
     const todayCollected = validReceipts
       .filter((r) => r.paymentDate >= startOfToday && r.paymentDate <= endOfToday)
       .reduce((acc, r) => acc + r.amountPaid, 0);
+
+    const collectionsByMethod: Record<string, number> = {
+      CASH: 0,
+      UPI: 0,
+      CARD: 0,
+      RAZORPAY: 0,
+      BANK_TRANSFER: 0,
+      CHEQUE: 0,
+      OTHER: 0,
+    };
+
+    const todayCollectionsByMethod: Record<string, number> = {
+      CASH: 0,
+      UPI: 0,
+      CARD: 0,
+      RAZORPAY: 0,
+      BANK_TRANSFER: 0,
+      OTHER: 0,
+    };
+
+    for (const r of validReceipts) {
+      const pm = r.paymentMethod || 'OTHER';
+      if (collectionsByMethod[pm] !== undefined) {
+        collectionsByMethod[pm] += r.amountPaid;
+      } else {
+        collectionsByMethod.OTHER += r.amountPaid;
+      }
+
+      if (r.paymentDate >= startOfToday && r.paymentDate <= endOfToday) {
+        if (todayCollectionsByMethod[pm] !== undefined) {
+          todayCollectionsByMethod[pm] += r.amountPaid;
+        } else {
+          todayCollectionsByMethod.OTHER += r.amountPaid;
+        }
+      }
+    }
 
     const nonCancelledInvoices = allOrgInvoices.filter((i) => i.paymentStatus !== 'CANCELLED');
     const totalInvoiced = nonCancelledInvoices.reduce((acc, i) => acc + i.totalAmount, 0);
@@ -539,7 +576,12 @@ export class FinanceService {
       overdueInvoices,
       totalInvoiced,
       totalCollected,
+      todayCollected,
       totalOutstanding,
+      collectionsByMethod,
+      todayCollectionsByMethod,
+      todayRazorpayCollected: todayCollectionsByMethod.RAZORPAY || 0,
+      totalRazorpayCollected: collectionsByMethod.RAZORPAY || 0,
       totalQuotations,
       todayQuotations,
       acceptedQuotations,

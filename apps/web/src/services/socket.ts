@@ -145,3 +145,21 @@ export const onSocketConnect = (callback: () => void): (() => void) => {
     socket.off('connect', callback);
   };
 };
+
+/**
+ * Subscribe to any custom backend broadcast event (e.g. receipt:generated, invoice:updated).
+ */
+export const subscribeToEvent = (
+  eventName: string,
+  callback: (data: any) => void,
+): (() => void) => {
+  const socket = getSocket();
+  if (!socket) return () => {};
+
+  socket.on(eventName, callback);
+
+  return () => {
+    socket.off(eventName, callback);
+  };
+};
+
